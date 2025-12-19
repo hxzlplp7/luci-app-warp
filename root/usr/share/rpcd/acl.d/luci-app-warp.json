@@ -1,41 +1,72 @@
 {
-    "admin/services/warp": {
-        "title": "Cloudflare WARP",
-        "order": 80,
-        "action": {
-            "type": "firstchild"
-        },
-        "depends": {
-            "acl": [
-                "luci-app-warp"
+    "luci-app-warp": {
+        "description": "Grant access to WARP configuration",
+        "read": {
+            "cbi": [
+                "warp"
             ],
-            "uci": {
-                "warp": true
+            "file": {
+                "/etc/config/warp": [
+                    "read"
+                ],
+                "/etc/warp/*": [
+                    "read"
+                ],
+                "/usr/bin/warp-manager": [
+                    "exec"
+                ]
+            },
+            "uci": [
+                "warp"
+            ],
+            "ubus": {
+                "file": [
+                    "read",
+                    "stat"
+                ],
+                "luci": [
+                    "getInitList",
+                    "getLocaltime"
+                ],
+                "service": [
+                    "list"
+                ],
+                "uci": [
+                    "get"
+                ]
             }
-        }
-    },
-    "admin/services/warp/settings": {
-        "title": "设置",
-        "order": 10,
-        "action": {
-            "type": "view",
-            "path": "warp/settings"
-        }
-    },
-    "admin/services/warp/status": {
-        "title": "状态",
-        "order": 20,
-        "action": {
-            "type": "template",
-            "path": "warp/status"
-        }
-    },
-    "admin/services/warp/log": {
-        "title": "日志",
-        "order": 30,
-        "action": {
-            "type": "template",
-            "path": "warp/log"
+        },
+        "write": {
+            "cbi": [
+                "warp"
+            ],
+            "file": {
+                "/etc/config/warp": [
+                    "write"
+                ],
+                "/etc/warp/*": [
+                    "write"
+                ],
+                "/usr/bin/warp-manager": [
+                    "exec"
+                ]
+            },
+            "uci": [
+                "warp"
+            ],
+            "ubus": {
+                "luci": [
+                    "setInitAction"
+                ],
+                "uci": [
+                    "add",
+                    "apply",
+                    "confirm",
+                    "delete",
+                    "order",
+                    "set"
+                ]
+            }
         }
     }
 }
