@@ -52,6 +52,22 @@ o.rmempty = false
 o.default = "0"
 o.description = translate("启用后，中国大陆IP将不经过WARP直连")
 
+-- SOCKS代理设置
+s = m:section(TypedSection, "warp", translate("SOCKS5 代理"))
+s.anonymous = true
+s.addremove = false
+
+o = s:option(Flag, "socks_enabled", translate("启用 SOCKS5 代理"))
+o.rmempty = false
+o.default = "1"
+o.description = translate("在本地开启 SOCKS5 代理端口，供其他设备或应用使用")
+
+o = s:option(Value, "socks_port", translate("SOCKS5 端口"))
+o.datatype = "port"
+o.default = "1080"
+o.rmempty = false
+o.description = translate("SOCKS5 代理监听端口")
+
 -- 账户信息（只读）
 s = m:section(TypedSection, "warp", translate("账户信息"))
 s.anonymous = true

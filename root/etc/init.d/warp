@@ -8,6 +8,7 @@ USE_PROCD=1
 
 PROG=/usr/bin/warp-manager
 CONFIG_FILE=/etc/config/warp
+SOCKS_PID_FILE=/var/run/warp-socks.pid
 
 get_config() {
     config_load warp
@@ -23,6 +24,8 @@ get_config() {
     config_get ADDRESS_V4 config address_v4 ""
     config_get ADDRESS_V6 config address_v6 ""
     config_get RESERVED config reserved ""
+    config_get SOCKS_PORT config socks_port "1080"
+    config_get SOCKS_ENABLED config socks_enabled "1"
 }
 
 setup_interface() {
@@ -76,7 +79,6 @@ setup_interface() {
     
     # 设置reserved (如果有)
     [ -n "$RESERVED" ] && {
-        # Reserved bytes需要转换为十进制
         uci set network.warp_peer.reserved="$RESERVED"
     }
     
@@ -85,11 +87,124 @@ setup_interface() {
     # 设置防火墙规则
     setup_firewall
     
+    # 设置路由
+    setup_routes
+    
     # 重启网络
     /etc/init.d/network reload
     
+    # 等待接口启动
+    sleep 3
+    
+    # 启动SOCKS代理
+    [ "$SOCKS_ENABLED" = "1" ] && start_socks
+    
     logger -t warp "WARP interface configured successfully"
     return 0
+}
+
+setup_routes() {
+    get_config
+    
+    # 删除旧的路由配置
+    uci -q delete network.warp_route
+    uci -q delete network.warp_ep1
+    uci -q delete network.warp_ep2
+    uci -q delete network.warp_ep3
+    
+    if [ "$GLOBAL_PROXY" = "1" ]; then
+        # 添加默认路由走warp
+        uci set network.warp_route=route
+        uci set network.warp_route.interface='warp'
+        uci set network.warp_route.target='0.0.0.0/0'
+        uci set network.warp_route.metric='10'
+        
+        # 获取当前WAN网关
+        local wan_gw=$(ip route show default | grep -v warp | awk '{print $3}' | head -1)
+        local wan_if=$(ip route show default | grep -v warp | awk '{print $5}' | head -1)
+        
+        if [ -n "$wan_gw" ]; then
+            # 保留Cloudflare endpoint的路由（避免死循环）
+            uci set network.warp_ep1=route
+            uci set network.warp_ep1.interface='wan'
+            uci set network.warp_ep1.target='162.159.192.0/24'
+            uci set network.warp_ep1.gateway="$wan_gw"
+            
+            uci set network.warp_ep2=route
+            uci set network.warp_ep2.interface='wan'
+            uci set network.warp_ep2.target='162.159.193.0/24'
+            uci set network.warp_ep2.gateway="$wan_gw"
+            
+            uci set network.warp_ep3=route
+            uci set network.warp_ep3.interface='wan'
+            uci set network.warp_ep3.target='162.159.195.0/24'
+            uci set network.warp_ep3.gateway="$wan_gw"
+            
+            # engage.cloudflareclient.com 可能解析到不同IP，添加更多路由
+            uci set network.warp_ep4=route
+            uci set network.warp_ep4.interface='wan'
+            uci set network.warp_ep4.target='198.18.0.0/16'
+            uci set network.warp_ep4.gateway="$wan_gw"
+        fi
+    fi
+    
+    uci commit network
+    logger -t warp "Routes configured"
+}
+
+start_socks() {
+    get_config
+    
+    # 停止现有的SOCKS代理
+    stop_socks
+    
+    # 检查是否安装了redsocks或gost
+    if command -v gost >/dev/null 2>&1; then
+        # 使用gost作为SOCKS代理
+        gost -L "socks5://0.0.0.0:${SOCKS_PORT}?bind=${ADDRESS_V4}" &
+        echo $! > "$SOCKS_PID_FILE"
+        logger -t warp "SOCKS5 proxy started on port $SOCKS_PORT (gost)"
+    elif command -v microsocks >/dev/null 2>&1; then
+        # 使用microsocks
+        microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
+        echo $! > "$SOCKS_PID_FILE"
+        logger -t warp "SOCKS5 proxy started on port $SOCKS_PORT (microsocks)"
+    else
+        # 使用简单的socat转发（如果可用）
+        logger -t warp "No SOCKS proxy software found (gost/microsocks). SOCKS proxy disabled."
+        logger -t warp "Install with: opkg install microsocks"
+    fi
+    
+    # 添加防火墙规则允许SOCKS端口
+    setup_socks_firewall
+}
+
+stop_socks() {
+    if [ -f "$SOCKS_PID_FILE" ]; then
+        kill $(cat "$SOCKS_PID_FILE") 2>/dev/null
+        rm -f "$SOCKS_PID_FILE"
+    fi
+    # 清理可能残留的进程
+    killall microsocks 2>/dev/null
+    killall gost 2>/dev/null
+}
+
+setup_socks_firewall() {
+    get_config
+    
+    # 检查是否已有socks规则
+    local rule_exists=$(uci -q get firewall.warp_socks)
+    
+    if [ -z "$rule_exists" ]; then
+        uci set firewall.warp_socks=rule
+        uci set firewall.warp_socks.name='Allow-WARP-SOCKS'
+        uci set firewall.warp_socks.src='lan'
+        uci set firewall.warp_socks.dest_port="$SOCKS_PORT"
+        uci set firewall.warp_socks.proto='tcp'
+        uci set firewall.warp_socks.target='ACCEPT'
+        uci commit firewall
+        /etc/init.d/firewall reload
+    fi
 }
 
 setup_firewall() {
@@ -118,14 +233,23 @@ setup_firewall() {
 }
 
 remove_interface() {
+    # 停止SOCKS代理
+    stop_socks
+    
     # 删除WireGuard接口
     uci -q delete network.warp
     uci -q delete network.warp_peer
+    uci -q delete network.warp_route
+    uci -q delete network.warp_ep1
+    uci -q delete network.warp_ep2
+    uci -q delete network.warp_ep3
+    uci -q delete network.warp_ep4
     uci commit network
     
     # 删除防火墙规则
     uci -q delete firewall.warp_zone
     uci -q delete firewall.lan_warp
+    uci -q delete firewall.warp_socks
     uci commit firewall
     
     /etc/init.d/network reload

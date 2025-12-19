@@ -35,6 +35,9 @@ function action_status()
     local uci = require "luci.model.uci".cursor()
     local jsonc = require "luci.jsonc"
     
+    local socks_port = uci:get("warp", "config", "socks_port") or "1080"
+    local socks_enabled = uci:get("warp", "config", "socks_enabled") or "1"
+    
     local status = {
         enabled = uci:get("warp", "config", "enabled") == "1",
         running = false,
@@ -48,7 +51,10 @@ function action_status()
         tx = "",
         rx = "",
         address_v4 = uci:get("warp", "config", "address_v4") or "",
-        address_v6 = uci:get("warp", "config", "address_v6") or ""
+        address_v6 = uci:get("warp", "config", "address_v6") or "",
+        socks_port = socks_port,
+        socks_enabled = socks_enabled == "1",
+        socks_running = false
     }
     
     -- 检查接口是否存在
@@ -58,6 +64,10 @@ function action_status()
     -- 检查账户是否注册
     local account_exists = nixio.fs.access("/etc/warp/account.json")
     status.account_registered = account_exists
+    
+    -- 检查SOCKS代理是否运行
+    local socks_check = sys.call("netstat -tln 2>/dev/null | grep -q ':" .. socks_port .. " '")
+    status.socks_running = (socks_check == 0)
     
     if status.interface_exists then
         status.running = true
@@ -104,6 +114,7 @@ end
 function action_test()
     local http = require "luci.http"
     local sys = require "luci.sys"
+    local uci = require "luci.model.uci".cursor()
     
     local result = {
         success = false,
@@ -112,8 +123,16 @@ function action_test()
         location = ""
     }
     
-    -- 测试Cloudflare Trace
-    local trace = sys.exec("curl -s --interface warp --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null")
+    -- 获取SOCKS端口
+    local socks_port = uci:get("warp", "config", "socks_port") or "1080"
+    
+    -- 先尝试通过SOCKS代理测试
+    local trace = sys.exec("curl -s --socks5 127.0.0.1:" .. socks_port .. " --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null")
+    
+    -- 如果SOCKS失败，尝试直接通过warp接口测试
+    if not trace or trace == "" then
+        trace = sys.exec("curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null")
+    end
     
     if trace and trace ~= "" then
         result.success = true
