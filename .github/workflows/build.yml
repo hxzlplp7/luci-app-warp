@@ -1,0 +1,138 @@
+name: Build IPK
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  PACKAGE_NAME: luci-app-warp
+  VERSION: 1.0.0
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - x86_64
+          - aarch64_cortex-a53
+          - arm_cortex-a7_neon-vfpv4
+          - mipsel_24kc
+        include:
+          - arch: x86_64
+            sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/x86/64/openwrt-sdk-23.05.5-x86-64_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          - arch: aarch64_cortex-a53
+            sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/rockchip/armv8/openwrt-sdk-23.05.5-rockchip-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+          - arch: arm_cortex-a7_neon-vfpv4
+            sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/sunxi/cortexa7/openwrt-sdk-23.05.5-sunxi-cortexa7_gcc-12.3.0_musl_eabi.Linux-x86_64.tar.xz
+          - arch: mipsel_24kc
+            sdk_url: https://downloads.openwrt.org/releases/23.05.5/targets/ramips/mt7621/openwrt-sdk-23.05.5-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk \
+            gcc-multilib g++-multilib gettext git libncurses5-dev libssl-dev \
+            python3-distutils rsync unzip zlib1g-dev file wget
+
+      - name: Download SDK
+        run: |
+          wget -q ${{ matrix.sdk_url }} -O openwrt-sdk.tar.xz
+          tar -xf openwrt-sdk.tar.xz
+          mv openwrt-sdk-* openwrt-sdk
+
+      - name: Prepare Package
+        run: |
+          mkdir -p openwrt-sdk/package/${{ env.PACKAGE_NAME }}
+          cp -r ./* openwrt-sdk/package/${{ env.PACKAGE_NAME }}/ 2>/dev/null || true
+          rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}/.git
+          rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}/.github
+          
+          # 更新feeds
+          cd openwrt-sdk
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Build Package
+        run: |
+          cd openwrt-sdk
+          make defconfig
+          make package/${{ env.PACKAGE_NAME }}/compile V=s -j$(nproc) || make package/${{ env.PACKAGE_NAME }}/compile V=s -j1
+
+      - name: Collect Artifacts
+        run: |
+          mkdir -p artifacts
+          find openwrt-sdk/bin -name "*${{ env.PACKAGE_NAME }}*.ipk" -exec cp {} artifacts/ \;
+          ls -la artifacts/
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}-${{ matrix.arch }}
+          path: artifacts/*.ipk
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List Artifacts
+        run: |
+          find artifacts -type f -name "*.ipk" | head -20
+          ls -la artifacts/ || echo "No artifacts directory"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/**/*.ipk
+          body: |
+            ## Cloudflare WARP for OpenWrt ${{ github.ref_name }}
+            
+            ### 功能特性
+            - 🚀 一键注册 Cloudflare WARP 账户
+            - 🌍 支持全局流量接管
+            - 🇨🇳 可选绕过中国大陆IP
+            - 🔑 支持 WARP+ License 升级
+            - 🎨 现代化 LuCI 管理界面
+            
+            ### 安装方法
+            1. 下载对应架构的 ipk 文件
+            2. 上传到路由器并安装：`opkg install luci-app-warp_*.ipk`
+            3. 访问 LuCI -> 服务 -> Cloudflare WARP
+            
+            ### 架构说明
+            | 文件 | 适用设备 |
+            |------|----------|
+            | `*x86_64*` | x86 软路由 |
+            | `*aarch64*` | ARM64 设备 (R2S/R4S/树莓派4等) |
+            | `*arm_cortex-a7*` | ARM32 设备 (香橙派等) |
+            | `*mipsel_24kc*` | MT7621 设备 (小米路由器等) |
+            
+            ### 依赖
+            需要先安装：`wireguard-tools`, `kmod-wireguard`, `luci-proto-wireguard`, `curl`, `jsonfilter`
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
