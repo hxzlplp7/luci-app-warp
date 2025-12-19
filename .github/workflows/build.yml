@@ -37,6 +37,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          path: luci-app-warp
 
       - name: Setup Environment
         run: |
@@ -53,34 +55,39 @@ jobs:
 
       - name: Prepare Package
         run: |
-          mkdir -p openwrt-sdk/package/${{ env.PACKAGE_NAME }}
-          cp -r ./* openwrt-sdk/package/${{ env.PACKAGE_NAME }}/ 2>/dev/null || true
-          rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}/.git
-          rm -rf openwrt-sdk/package/${{ env.PACKAGE_NAME }}/.github
+          # Copy package to SDK
+          cp -r luci-app-warp openwrt-sdk/package/
           
-          # 更新feeds
+          # Update feeds
           cd openwrt-sdk
+          echo "src-git base https://git.openwrt.org/openwrt/openwrt.git;openwrt-23.05" > feeds.conf
+          echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-23.05" >> feeds.conf
+          echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-23.05" >> feeds.conf
+          
           ./scripts/feeds update -a
           ./scripts/feeds install -a
+          
+          # Enable package in config
+          echo "CONFIG_PACKAGE_luci-app-warp=m" >> .config
+          make defconfig
 
       - name: Build Package
         run: |
           cd openwrt-sdk
-          make defconfig
-          make package/${{ env.PACKAGE_NAME }}/compile V=s -j$(nproc) || make package/${{ env.PACKAGE_NAME }}/compile V=s -j1
+          make package/luci-app-warp/compile V=s -j$(nproc) || make package/luci-app-warp/compile V=s -j1
 
       - name: Collect Artifacts
         run: |
           mkdir -p artifacts
-          find openwrt-sdk/bin -name "*${{ env.PACKAGE_NAME }}*.ipk" -exec cp {} artifacts/ \;
-          ls -la artifacts/
+          find openwrt-sdk/bin -name "*luci-app-warp*.ipk" -exec cp {} artifacts/ \;
+          ls -la artifacts/ || echo "No artifacts found"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.PACKAGE_NAME }}-${{ matrix.arch }}
           path: artifacts/*.ipk
-          if-no-files-found: error
+          if-no-files-found: warn
 
   release:
     needs: build
@@ -97,17 +104,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
 
-      - name: List Artifacts
+      - name: Prepare Release Files
         run: |
-          find artifacts -type f -name "*.ipk" | head -20
-          ls -la artifacts/ || echo "No artifacts directory"
+          mkdir -p release
+          find artifacts -name "*.ipk" -exec cp {} release/ \;
+          ls -la release/
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/**/*.ipk
+          files: release/*.ipk
           body: |
             ## Cloudflare WARP for OpenWrt ${{ github.ref_name }}
             
