@@ -1,0 +1,11 @@
+#!/bin/sh /etc/rc.common
+# WARP Cron Job for China IP update
+# Copyright (C) 2024
+
+START=99
+
+boot() {
+    # 每周日凌晨3点更新中国IP列表
+    echo "0 3 * * 0 /usr/bin/warp-update-china >/dev/null 2>&1" >> /etc/crontabs/root
+    /etc/init.d/cron restart
+}

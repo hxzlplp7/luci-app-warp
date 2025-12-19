@@ -1,0 +1,65 @@
+#!/bin/sh
+# 更新中国IP列表脚本
+# Copyright (C) 2024
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+CHINA_IP_FILE="/etc/warp/china_ip.txt"
+CHINA_IP_URL="https://raw.githubusercontent.com/17mon/china_ip_list/master/china_ip_list.txt"
+
+# 创建目录
+mkdir -p /etc/warp
+
+echo "正在下载中国IP列表..."
+
+# 下载中国IP列表
+curl -s -o "$CHINA_IP_FILE.tmp" "$CHINA_IP_URL"
+
+if [ $? -eq 0 ] && [ -s "$CHINA_IP_FILE.tmp" ]; then
+    mv "$CHINA_IP_FILE.tmp" "$CHINA_IP_FILE"
+    echo "中国IP列表更新成功，共 $(wc -l < "$CHINA_IP_FILE") 条记录"
+    
+    # 应用到路由表
+    apply_china_routes
+else
+    rm -f "$CHINA_IP_FILE.tmp"
+    echo "下载失败"
+    exit 1
+fi
+
+apply_china_routes() {
+    # 检查是否启用绕过中国IP
+    BYPASS_CHINA=$(uci -q get warp.config.bypass_china)
+    [ "$BYPASS_CHINA" != "1" ] && return
+    
+    # 检查WARP接口是否存在
+    ip link show warp >/dev/null 2>&1 || return
+    
+    # 获取默认网关
+    DEFAULT_GW=$(ip route show default | grep -v warp | awk '{print $3}' | head -1)
+    DEFAULT_IF=$(ip route show default | grep -v warp | awk '{print $5}' | head -1)
+    
+    [ -z "$DEFAULT_GW" ] && {
+        echo "无法获取默认网关"
+        return
+    }
+    
+    echo "正在应用中国IP路由规则..."
+    
+    # 创建路由表
+    grep -q "100 china" /etc/iproute2/rt_tables 2>/dev/null || \
+        echo "100 china" >> /etc/iproute2/rt_tables
+    
+    # 清除旧规则
+    while ip rule del table china 2>/dev/null; do :; done
+    ip route flush table china 2>/dev/null
+    
+    # 添加中国IP路由
+    while read -r cidr; do
+        [ -n "$cidr" ] && ip route add "$cidr" via "$DEFAULT_GW" dev "$DEFAULT_IF" table china 2>/dev/null
+    done < "$CHINA_IP_FILE"
+    
+    # 添加路由规则
+    ip rule add from all table china priority 100
+    
+    echo "中国IP路由规则已应用"
+}

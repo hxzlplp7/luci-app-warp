@@ -1,0 +1,185 @@
+<%# Copyright (C) 2024 SPDX-License-Identifier: GPL-3.0-or-later -%>
+
+    <%+header%>
+
+        <style>
+            .log-container {
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+
+            .log-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+
+            .log-header h2 {
+                margin: 0;
+                color: #333;
+            }
+
+            .log-actions {
+                display: flex;
+                gap: 10px;
+            }
+
+            .btn {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 600;
+                transition: all 0.3s;
+            }
+
+            .btn-primary {
+                background: linear-gradient(135deg, #f48120 0%, #faae2b 100%);
+                color: white;
+            }
+
+            .btn-secondary {
+                background: #6c757d;
+                color: white;
+            }
+
+            .btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+            }
+
+            .log-content {
+                background: #1e1e1e;
+                color: #d4d4d4;
+                padding: 20px;
+                border-radius: 8px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 13px;
+                line-height: 1.5;
+                height: 500px;
+                overflow-y: auto;
+                white-space: pre-wrap;
+                word-wrap: break-word;
+            }
+
+            .log-content::-webkit-scrollbar {
+                width: 8px;
+            }
+
+            .log-content::-webkit-scrollbar-track {
+                background: #2d2d2d;
+            }
+
+            .log-content::-webkit-scrollbar-thumb {
+                background: #555;
+                border-radius: 4px;
+            }
+
+            .log-content::-webkit-scrollbar-thumb:hover {
+                background: #666;
+            }
+
+            .log-line-info {
+                color: #4fc3f7;
+            }
+
+            .log-line-warning {
+                color: #ffb74d;
+            }
+
+            .log-line-error {
+                color: #ef5350;
+            }
+
+            .log-line-success {
+                color: #81c784;
+            }
+
+            .auto-refresh {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                color: #666;
+            }
+
+            .auto-refresh input {
+                cursor: pointer;
+            }
+        </style>
+
+        <div class="log-container">
+            <div class="log-header">
+                <h2>📋 WARP 日志</h2>
+                <div class="log-actions">
+                    <label class="auto-refresh">
+                        <input type="checkbox" id="auto-refresh" checked>
+                        自动刷新
+                    </label>
+                    <button class="btn btn-primary" onclick="refreshLog()">🔄 刷新</button>
+                    <button class="btn btn-secondary" onclick="clearLog()">🗑️ 清空</button>
+                </div>
+            </div>
+
+            <div id="log-content" class="log-content">
+                正在加载日志...
+            </div>
+        </div>
+
+        <script>
+            var logInterval;
+
+            function refreshLog() {
+                var logContent = document.getElementById('log-content');
+
+                XHR.get('<%=url("cgi-bin/luci")%>', {
+                    exec: 'logread -e warp | tail -100'
+                }, function (x) {
+                    if (x && x.responseText) {
+                        var lines = x.responseText.split('\n');
+                        var formattedLines = lines.map(function (line) {
+                            if (line.indexOf('error') !== -1 || line.indexOf('Error') !== -1 || line.indexOf('ERROR') !== -1) {
+                                return '<span class="log-line-error">' + escapeHtml(line) + '</span>';
+                            } else if (line.indexOf('warning') !== -1 || line.indexOf('Warning') !== -1 || line.indexOf('WARN') !== -1) {
+                                return '<span class="log-line-warning">' + escapeHtml(line) + '</span>';
+                            } else if (line.indexOf('success') !== -1 || line.indexOf('Success') !== -1 || line.indexOf('connected') !== -1) {
+                                return '<span class="log-line-success">' + escapeHtml(line) + '</span>';
+                            } else if (line.indexOf('info') !== -1 || line.indexOf('Info') !== -1 || line.indexOf('warp') !== -1) {
+                                return '<span class="log-line-info">' + escapeHtml(line) + '</span>';
+                            }
+                            return escapeHtml(line);
+                        });
+                        logContent.innerHTML = formattedLines.join('\n') || '暂无日志';
+                        logContent.scrollTop = logContent.scrollHeight;
+                    }
+                });
+            }
+
+            function clearLog() {
+                var logContent = document.getElementById('log-content');
+                logContent.innerHTML = '日志已清空';
+            }
+
+            function escapeHtml(text) {
+                var div = document.createElement('div');
+                div.appendChild(document.createTextNode(text));
+                return div.innerHTML;
+            }
+
+            function toggleAutoRefresh() {
+                var checkbox = document.getElementById('auto-refresh');
+                if (checkbox.checked) {
+                    logInterval = setInterval(refreshLog, 5000);
+                } else {
+                    clearInterval(logInterval);
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', function () {
+                refreshLog();
+                document.getElementById('auto-refresh').addEventListener('change', toggleAutoRefresh);
+                logInterval = setInterval(refreshLog, 5000);
+            });
+        </script>
+
+        <%+footer%>

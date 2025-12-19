@@ -1,0 +1,159 @@
+#!/bin/sh /etc/rc.common
+# Copyright (C) 2024
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/warp-manager
+CONFIG_FILE=/etc/config/warp
+
+get_config() {
+    config_load warp
+    config_get ENABLED config enabled 0
+    config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
+    config_get MTU config mtu 1280
+    config_get DNS config dns "1.1.1.1"
+    config_get IPV6 config ipv6 1
+    config_get GLOBAL_PROXY config global_proxy 1
+    config_get BYPASS_CHINA config bypass_china 0
+    config_get PRIVATE_KEY config private_key ""
+    config_get PUBLIC_KEY config public_key ""
+    config_get ADDRESS_V4 config address_v4 ""
+    config_get ADDRESS_V6 config address_v6 ""
+    config_get RESERVED config reserved ""
+}
+
+setup_interface() {
+    get_config
+    
+    [ -z "$PRIVATE_KEY" ] && {
+        logger -t warp "Error: Private key not configured"
+        return 1
+    }
+    
+    [ -z "$ADDRESS_V4" ] && {
+        logger -t warp "Error: IPv4 address not configured"
+        return 1
+    }
+    
+    # 删除现有的warp接口
+    uci -q delete network.warp
+    
+    # 创建WireGuard接口
+    uci set network.warp=interface
+    uci set network.warp.proto='wireguard'
+    uci set network.warp.private_key="$PRIVATE_KEY"
+    uci set network.warp.mtu="$MTU"
+    
+    # 设置地址
+    uci add_list network.warp.addresses="$ADDRESS_V4"
+    [ "$IPV6" = "1" ] && [ -n "$ADDRESS_V6" ] && {
+        uci add_list network.warp.addresses="$ADDRESS_V6"
+    }
+    
+    # 设置DNS
+    uci set network.warp.dns="$DNS"
+    
+    # 删除现有的peer
+    uci -q delete network.warp_peer
+    
+    # 创建peer
+    uci set network.warp_peer=wireguard_warp
+    uci set network.warp_peer.public_key='bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo='
+    uci set network.warp_peer.endpoint_host="${ENDPOINT%:*}"
+    uci set network.warp_peer.endpoint_port="${ENDPOINT##*:}"
+    uci set network.warp_peer.persistent_keepalive='25'
+    
+    # 设置AllowedIPs
+    if [ "$GLOBAL_PROXY" = "1" ]; then
+        uci add_list network.warp_peer.allowed_ips='0.0.0.0/0'
+        [ "$IPV6" = "1" ] && uci add_list network.warp_peer.allowed_ips='::/0'
+    else
+        uci add_list network.warp_peer.allowed_ips='0.0.0.0/0'
+    fi
+    
+    # 设置reserved (如果有)
+    [ -n "$RESERVED" ] && {
+        # Reserved bytes需要转换为十进制
+        uci set network.warp_peer.reserved="$RESERVED"
+    }
+    
+    uci commit network
+    
+    # 设置防火墙规则
+    setup_firewall
+    
+    # 重启网络
+    /etc/init.d/network reload
+    
+    logger -t warp "WARP interface configured successfully"
+    return 0
+}
+
+setup_firewall() {
+    # 检查warp zone是否已存在
+    local zone_exists=$(uci -q get firewall.warp_zone)
+    
+    if [ -z "$zone_exists" ]; then
+        # 创建warp zone
+        uci set firewall.warp_zone=zone
+        uci set firewall.warp_zone.name='warp'
+        uci set firewall.warp_zone.input='REJECT'
+        uci set firewall.warp_zone.output='ACCEPT'
+        uci set firewall.warp_zone.forward='REJECT'
+        uci set firewall.warp_zone.masq='1'
+        uci set firewall.warp_zone.mtu_fix='1'
+        uci add_list firewall.warp_zone.network='warp'
+        
+        # 创建lan到warp的转发规则
+        uci set firewall.lan_warp=forwarding
+        uci set firewall.lan_warp.src='lan'
+        uci set firewall.lan_warp.dest='warp'
+        
+        uci commit firewall
+        /etc/init.d/firewall reload
+    fi
+}
+
+remove_interface() {
+    # 删除WireGuard接口
+    uci -q delete network.warp
+    uci -q delete network.warp_peer
+    uci commit network
+    
+    # 删除防火墙规则
+    uci -q delete firewall.warp_zone
+    uci -q delete firewall.lan_warp
+    uci commit firewall
+    
+    /etc/init.d/network reload
+    /etc/init.d/firewall reload
+    
+    logger -t warp "WARP interface removed"
+}
+
+start_service() {
+    get_config
+    
+    [ "$ENABLED" != "1" ] && {
+        logger -t warp "WARP is disabled"
+        return 0
+    }
+    
+    setup_interface
+}
+
+stop_service() {
+    remove_interface
+}
+
+reload_service() {
+    stop_service
+    start_service
+}
+
+service_triggers() {
+    procd_add_reload_trigger "warp"
+}

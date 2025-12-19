@@ -1,0 +1,100 @@
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Project-Id-Version: luci-app-warp 1.0\n"
+
+msgid "Cloudflare WARP"
+msgstr "Cloudflare WARP"
+
+msgid "LuCI support for Cloudflare WARP with global proxy and china ip bypass"
+msgstr "支持全局代理和绕过中国IP的Cloudflare WARP LuCI支持"
+
+msgid "Settings"
+msgstr "设置"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Log"
+msgstr "日志"
+
+msgid "Basic Settings"
+msgstr "基本设置"
+
+msgid "Proxy Settings"
+msgstr "代理设置"
+
+msgid "Account Information"
+msgstr "账户信息"
+
+msgid "Advanced Settings"
+msgstr "高级设置"
+
+msgid "Enabled"
+msgstr "启用"
+
+msgid "Server Endpoint"
+msgstr "服务器地址"
+
+msgid "WARP server endpoint address and port"
+msgstr "WARP 服务器端点地址和端口"
+
+msgid "MTU"
+msgstr "MTU"
+
+msgid "DNS Server"
+msgstr "DNS 服务器"
+
+msgid "DNS server to use"
+msgstr "使用的DNS服务器地址"
+
+msgid "Enable IPv6"
+msgstr "启用 IPv6"
+
+msgid "Enable IPv6 support"
+msgstr "启用IPv6支持"
+
+msgid "Global Proxy"
+msgstr "全局代理"
+
+msgid "If enabled, all traffic will be routed through WARP."
+msgstr "启用后，所有流量都将通过WARP。"
+
+msgid "Bypass China IP"
+msgstr "绕过中国大陆IP"
+
+msgid "If enabled, traffic to China IPs will bypass WARP."
+msgstr "启用后，中国大陆IP将不经过WARP直连"
+
+msgid "IPv4 Address"
+msgstr "IPv4 地址"
+
+msgid "IPv6 Address"
+msgstr "IPv6 地址"
+
+msgid "Not Configured"
+msgstr "未配置"
+
+msgid "WARP+ License Key"
+msgstr "WARP+ License Key"
+
+msgid "Enter WARP+ License Key to upgrade"
+msgstr "如果您有WARP+ License Key，可以在此输入以升级到WARP+"
+
+msgid "Private Key"
+msgstr "私钥"
+
+msgid "WireGuard Private Key (Auto-generated)"
+msgstr "WireGuard 私钥（自动生成，通常不需要手动修改）"
+
+msgid "Public Key"
+msgstr "公钥"
+
+msgid "WireGuard Public Key"
+msgstr "WireGuard 公钥"
+
+msgid "Reserved Bytes"
+msgstr "Reserved 字节"
+
+msgid "WARP Reserved Bytes"
+msgstr "WARP Reserved 字节"
