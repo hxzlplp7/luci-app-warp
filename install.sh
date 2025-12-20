@@ -60,7 +60,7 @@ install_app() {
     
     # 复制文件（这里需要根据实际情况修改）
     # 假设从GitHub下载
-    REPO_URL="https://raw.githubusercontent.com/your-repo/luci-app-warp/main"
+    REPO_URL="https://raw.githubusercontent.com/hxzlplp7/luci-app-warp/main"
     
     # 下载核心脚本
     curl -sL "${REPO_URL}/root/usr/bin/warp-manager" -o /usr/bin/warp-manager
