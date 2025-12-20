@@ -11,7 +11,7 @@ on:
 
 env:
   PACKAGE_NAME: luci-app-warp
-  VERSION: 1.2.3
+  VERSION: 1.2.4
 
 jobs:
   build:

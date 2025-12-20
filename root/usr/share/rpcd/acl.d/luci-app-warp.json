@@ -23,6 +23,12 @@
                 ],
                 "/bin/sh": [
                     "exec"
+                ],
+                "/sbin/ip": [
+                    "exec"
+                ],
+                "/usr/sbin/iptables": [
+                    "exec"
                 ]
             },
             "uci": [
@@ -44,7 +50,11 @@
                 "uci": [
                     "get"
                 ]
-            }
+            },
+            "process": [
+                "list",
+                "signal"
+            ]
         },
         "write": {
             "file": {
@@ -61,6 +71,12 @@
                     "exec"
                 ],
                 "/bin/sh": [
+                    "exec"
+                ],
+                "/sbin/ip": [
+                    "exec"
+                ],
+                "/usr/sbin/iptables": [
                     "exec"
                 ]
             },

@@ -7,359 +7,107 @@ STOP=10
 USE_PROCD=1
 
 PROG=/usr/bin/warp-manager
-CONFIG_FILE=/etc/config/warp
 SOCKS_PID_FILE=/var/run/warp-socks.pid
 
-get_config() {
+start_service() {
     config_load warp
     config_get ENABLED config enabled 0
-    config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
-    config_get MTU config mtu 1280
-    config_get DNS config dns "1.1.1.1"
-    config_get IPV6 config ipv6 1
-    config_get GLOBAL_PROXY config global_proxy 1
-    config_get BYPASS_CHINA config bypass_china 0
+    [ "$ENABLED" != "1" ] && return 0
+    
+    # 获取配置
     config_get PRIVATE_KEY config private_key ""
-    config_get PUBLIC_KEY config public_key ""
     config_get ADDRESS_V4 config address_v4 ""
     config_get ADDRESS_V6 config address_v6 ""
-    config_get RESERVED config reserved ""
-    config_get SOCKS_PORT config socks_port "1080"
+    config_get MTU config mtu 1280
+    config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
+    config_get DNS config dns "1.1.1.1"
+    
     config_get SOCKS_ENABLED config socks_enabled "1"
+    config_get SOCKS_PORT config socks_port "1080"
     
-    # 前置代理配置
-    config_get PRE_PROXY_ENABLED config pre_proxy_enabled "0"
-    config_get PRE_PROXY_TYPE config pre_proxy_type "socks5"
-    config_get PRE_PROXY_ADDR config pre_proxy_addr "127.0.0.1"
-    config_get PRE_PROXY_PORT config pre_proxy_port "7890"
-}
-
-setup_interface() {
-    get_config
+    # 确保没有残留接口
+    ip link delete warp >/dev/null 2>&1
     
-    [ -z "$PRIVATE_KEY" ] && {
-        logger -t warp "Error: Private key not configured"
-        return 1
-    }
+    # 1. 创建接口
+    ip link add dev warp type wireguard
+    wg set warp private-key <(echo "$PRIVATE_KEY")
     
-    [ -z "$ADDRESS_V4" ] && {
-        logger -t warp "Error: IPv4 address not configured"
-        return 1
-    }
+    # 2. 配置Peer
+    # 解析endpoint
+    local end_host="${ENDPOINT%:*}"
+    local end_port="${ENDPOINT##*:}"
     
-    # 先清理旧接口
-    remove_interface_only
-    
-    # 创建WireGuard接口配置
-    uci set network.warp=interface
-    uci set network.warp.proto='wireguard'
-    uci set network.warp.private_key="$PRIVATE_KEY"
-    uci set network.warp.mtu="$MTU"
-    
-    # 设置地址
-    uci add_list network.warp.addresses="$ADDRESS_V4"
-    [ "$IPV6" = "1" ] && [ -n "$ADDRESS_V6" ] && {
-        uci add_list network.warp.addresses="$ADDRESS_V6"
-    }
-    
-    # 设置DNS
-    uci set network.warp.dns="$DNS"
-    
-    # 创建peer
-    uci set network.warp_peer=wireguard_warp
-    uci set network.warp_peer.public_key='bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo='
-    uci set network.warp_peer.endpoint_host="${ENDPOINT%:*}"
-    uci set network.warp_peer.endpoint_port="${ENDPOINT##*:}"
-    uci set network.warp_peer.persistent_keepalive='25'
-    
-    # 设置AllowedIPs
-    if [ "$GLOBAL_PROXY" = "1" ]; then
-        uci add_list network.warp_peer.allowed_ips='0.0.0.0/0'
-        [ "$IPV6" = "1" ] && uci add_list network.warp_peer.allowed_ips='::/0'
-    else
-        uci add_list network.warp_peer.allowed_ips='0.0.0.0/0'
-    fi
-    
-    # 设置reserved (如果有)
-    [ -n "$RESERVED" ] && {
-        uci set network.warp_peer.reserved="$RESERVED"
-    }
-    
-    uci commit network
-    
-    # 设置防火墙规则
-    setup_firewall
-    
-    # 设置路由
-    setup_routes
-    
-    # 重载网络配置
-    /etc/init.d/network reload
-    
-    # 等待接口启动
-    sleep 3
-    
-    # 如果启用前置代理，设置代理链
-    if [ "$PRE_PROXY_ENABLED" = "1" ]; then
-        setup_pre_proxy
-    fi
-    
-    # 启动SOCKS代理
-    [ "$SOCKS_ENABLED" = "1" ] && start_socks
-    
-    logger -t warp "WARP interface configured successfully"
-    return 0
-}
-
-setup_pre_proxy() {
-    get_config
-    
-    [ -z "$PRE_PROXY_ADDR" ] || [ -z "$PRE_PROXY_PORT" ] && {
-        logger -t warp "Pre-proxy address or port not configured"
-        return 1
-    }
-    
-    # 获取WARP endpoint的IP
-    local endpoint_host="${ENDPOINT%:*}"
-    local endpoint_port="${ENDPOINT##*:}"
-    
-    # 解析endpoint IP
-    local endpoint_ip=""
-    endpoint_ip=$(nslookup "$endpoint_host" 2>/dev/null | grep -A1 "Name:" | grep "Address" | awk '{print $2}' | head -1)
-    [ -z "$endpoint_ip" ] && endpoint_ip=$(ping -c1 -W2 "$endpoint_host" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-    
-    if [ -z "$endpoint_ip" ]; then
-        logger -t warp "Cannot resolve WARP endpoint: $endpoint_host, using direct connection"
-        return 0
-    fi
-    
-    logger -t warp "Setting up pre-proxy: ${PRE_PROXY_TYPE}://${PRE_PROXY_ADDR}:${PRE_PROXY_PORT}"
-    
-    # 使用iptables/nftables将到WARP服务器的流量重定向到本地代理
-    # 这需要redsocks或类似工具，但WireGuard使用UDP所以比较复杂
-    
-    # 简单方案：设置路由让WARP endpoint走前置代理的出口
-    # 获取前置代理的出口接口
-    local proxy_route=$(ip route get "$PRE_PROXY_ADDR" 2>/dev/null | head -1)
-    local proxy_dev=$(echo "$proxy_route" | grep -oE 'dev [^ ]+' | awk '{print $2}')
-    local proxy_gw=$(echo "$proxy_route" | grep -oE 'via [^ ]+' | awk '{print $2}')
-    
-    if [ -n "$proxy_gw" ] && [ -n "$proxy_dev" ]; then
-        # 确保WARP endpoint通过原有网关访问（不走warp接口）
-        ip route add "$endpoint_ip/32" via "$proxy_gw" dev "$proxy_dev" 2>/dev/null
-        logger -t warp "Route added: $endpoint_ip via $proxy_gw dev $proxy_dev"
-    fi
-    
-    logger -t warp "Pre-proxy configured. Note: Full UDP proxy requires additional tools like udp2raw or gost."
-}
-
-setup_routes() {
-    get_config
-    
-    # 删除旧的路由配置
-    uci -q delete network.warp_route
-    uci -q delete network.warp_ep1
-    uci -q delete network.warp_ep2
-    uci -q delete network.warp_ep3
-    uci -q delete network.warp_ep4
-    
-    if [ "$GLOBAL_PROXY" = "1" ]; then
-        # 添加默认路由走warp
-        uci set network.warp_route=route
-        uci set network.warp_route.interface='warp'
-        uci set network.warp_route.target='0.0.0.0/0'
-        uci set network.warp_route.metric='10'
+    # 如果有前置代理配置，这里需要特殊处理路由，暂且按标准流程
+    # 简单的Peer配置
+    wg set warp peer "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=" \
+        endpoint "$end_host:$end_port" \
+        persistent-keepalive 25 \
+        allowed-ips "0.0.0.0/0,::/0"
         
-        # 获取当前WAN网关
-        local wan_gw=$(ip route show default | grep -v warp | awk '{print $3}' | head -1)
-        
-        if [ -n "$wan_gw" ]; then
-            # 保留Cloudflare endpoint的路由（避免死循环）
-            uci set network.warp_ep1=route
-            uci set network.warp_ep1.interface='wan'
-            uci set network.warp_ep1.target='162.159.192.0/24'
-            uci set network.warp_ep1.gateway="$wan_gw"
-            
-            uci set network.warp_ep2=route
-            uci set network.warp_ep2.interface='wan'
-            uci set network.warp_ep2.target='162.159.193.0/24'
-            uci set network.warp_ep2.gateway="$wan_gw"
-            
-            uci set network.warp_ep3=route
-            uci set network.warp_ep3.interface='wan'
-            uci set network.warp_ep3.target='162.159.195.0/24'
-            uci set network.warp_ep3.gateway="$wan_gw"
-            
-            uci set network.warp_ep4=route
-            uci set network.warp_ep4.interface='wan'
-            uci set network.warp_ep4.target='198.18.0.0/16'
-            uci set network.warp_ep4.gateway="$wan_gw"
-            
-            # 如果使用前置代理，也要保留代理服务器的路由
-            if [ "$PRE_PROXY_ENABLED" = "1" ] && [ -n "$PRE_PROXY_ADDR" ] && [ "$PRE_PROXY_ADDR" != "127.0.0.1" ]; then
-                uci set network.warp_proxy=route
-                uci set network.warp_proxy.interface='wan'
-                uci set network.warp_proxy.target="${PRE_PROXY_ADDR}/32"
-                uci set network.warp_proxy.gateway="$wan_gw"
-            fi
+    # 3. 配置地址和路由
+    ip address add "$ADDRESS_V4/32" dev warp
+    [ -n "$ADDRESS_V6" ] && ip address add "$ADDRESS_V6/128" dev warp
+    
+    ip link set mtu "$MTU" dev warp
+    ip link set up dev warp
+    
+    # 4. 添加路由 (使用简单粗暴的 ip route)
+    # 计算wan网关
+    local wan_gw=$(ip route show default | grep -v warp | awk '{print $3}' | head -1)
+    
+    # 添加Cloudflare endpoint的静态路由，防止死循环
+    if [ -n "$wan_gw" ]; then
+        # 解析endpoint IP (简单解析)
+        local end_ip=$(nslookup "$end_host" 2>/dev/null | grep Address | awk '{print $2}' | tail -1)
+        [ -n "$end_ip" ] && ip route add "$end_ip/32" via "$wan_gw" 2>/dev/null
+    fi
+    
+    # 添加默认路由 (如果启用了全局代理)
+    config_get GLOBAL_PROXY config global_proxy 1
+    if [ "$GLOBAL_PROXY" = "1" ]; then
+        # 添加两条 /1 路由覆盖默认路由，比删除默认路由更安全
+        ip route add 0.0.0.0/1 dev warp
+        ip route add 128.0.0.0/1 dev warp
+    fi
+    
+    # 5. 防火墙 (简单的伪装)
+    # 这部分必须配合 firewall config，或者直接用 iptables
+    iptables -t nat -A POSTROUTING -o warp -j MASQUERADE
+    
+    # 6. SOCKS5
+    if [ "$SOCKS_ENABLED" = "1" ]; then
+        if command -v microsocks >/dev/null 2>&1; then
+            microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
+            echo $! > "$SOCKS_PID_FILE"
         fi
     fi
     
-    uci commit network
-    logger -t warp "Routes configured"
+    logger -t warp "Service started via raw commands"
 }
 
-start_socks() {
-    get_config
+stop_service() {
+    # 1. 直接杀掉 WireGuard 接口 (最快的方法)
+    ip link delete warp >/dev/null 2>&1
     
-    # 停止现有的SOCKS代理
-    stop_socks
-    
-    # 检查是否安装了gost或microsocks
-    if command -v gost >/dev/null 2>&1; then
-        # 使用gost作为SOCKS代理
-        gost -L "socks5://0.0.0.0:${SOCKS_PORT}?bind=${ADDRESS_V4}" &
-        echo $! > "$SOCKS_PID_FILE"
-        logger -t warp "SOCKS5 proxy started on port $SOCKS_PORT (gost)"
-    elif command -v microsocks >/dev/null 2>&1; then
-        # 使用microsocks
-        microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
-        echo $! > "$SOCKS_PID_FILE"
-        logger -t warp "SOCKS5 proxy started on port $SOCKS_PORT (microsocks)"
-    else
-        logger -t warp "No SOCKS proxy software found. Install: opkg install microsocks"
-    fi
-    
-    # 添加防火墙规则允许SOCKS端口
-    setup_socks_firewall
-}
-
-stop_socks() {
+    # 2. 清理 SOCKS 进程
     if [ -f "$SOCKS_PID_FILE" ]; then
         kill $(cat "$SOCKS_PID_FILE") 2>/dev/null
         rm -f "$SOCKS_PID_FILE"
     fi
-    killall microsocks 2>/dev/null
-}
-
-setup_socks_firewall() {
-    get_config
+    killall microsocks >/dev/null 2>&1
+    killall gost >/dev/null 2>&1
     
-    local rule_exists=$(uci -q get firewall.warp_socks)
+    # 3. 清理路由 (接口删除后路由通常会自动消失，但为了保险)
+    ip route del 0.0.0.0/1 dev warp >/dev/null 2>&1
+    ip route del 128.0.0.0/1 dev warp >/dev/null 2>&1
     
-    if [ -z "$rule_exists" ]; then
-        uci set firewall.warp_socks=rule
-        uci set firewall.warp_socks.name='Allow-WARP-SOCKS'
-        uci set firewall.warp_socks.src='lan'
-        uci set firewall.warp_socks.dest_port="$SOCKS_PORT"
-        uci set firewall.warp_socks.proto='tcp'
-        uci set firewall.warp_socks.target='ACCEPT'
-        uci commit firewall
-        /etc/init.d/firewall reload 2>/dev/null
-    fi
-}
-
-setup_firewall() {
-    local zone_exists=$(uci -q get firewall.warp_zone)
+    # 4. 清理防火墙
+    iptables -t nat -D POSTROUTING -o warp -j MASQUERADE >/dev/null 2>&1
     
-    if [ -z "$zone_exists" ]; then
-        uci set firewall.warp_zone=zone
-        uci set firewall.warp_zone.name='warp'
-        uci set firewall.warp_zone.input='REJECT'
-        uci set firewall.warp_zone.output='ACCEPT'
-        uci set firewall.warp_zone.forward='REJECT'
-        uci set firewall.warp_zone.masq='1'
-        uci set firewall.warp_zone.mtu_fix='1'
-        uci add_list firewall.warp_zone.network='warp'
-        
-        uci set firewall.lan_warp=forwarding
-        uci set firewall.lan_warp.src='lan'
-        uci set firewall.lan_warp.dest='warp'
-        
-        uci commit firewall
-        /etc/init.d/firewall reload 2>/dev/null
-    fi
-}
-
-# 只删除接口，不删除防火墙规则（用于重启时）
-remove_interface_only() {
-    # 直接删除WireGuard接口（立即生效）
-    ip link set warp down 2>/dev/null
-    ip link delete warp 2>/dev/null
-    
-    # 删除UCI配置
-    uci -q delete network.warp
-    uci -q delete network.warp_peer
-    uci -q delete network.warp_route
-    uci -q delete network.warp_ep1
-    uci -q delete network.warp_ep2
-    uci -q delete network.warp_ep3
-    uci -q delete network.warp_ep4
-    uci -q delete network.warp_proxy
-    uci commit network
-}
-
-remove_interface() {
-    logger -t warp "Stopping WARP service..."
-    
-    # 停止SOCKS代理
-    stop_socks
-    
-    # 直接删除WireGuard接口（立即生效）
-    ip link set warp down 2>/dev/null
-    ip link delete warp 2>/dev/null
-    
-    # 删除可能的临时路由
-    ip route del 162.159.192.0/24 2>/dev/null
-    ip route del 162.159.193.0/24 2>/dev/null
-    ip route del 162.159.195.0/24 2>/dev/null
-    ip route del 198.18.0.0/16 2>/dev/null
-    
-    # 删除UCI网络配置
-    uci -q delete network.warp
-    uci -q delete network.warp_peer
-    uci -q delete network.warp_route
-    uci -q delete network.warp_ep1
-    uci -q delete network.warp_ep2
-    uci -q delete network.warp_ep3
-    uci -q delete network.warp_ep4
-    uci -q delete network.warp_proxy
-    uci commit network
-    
-    # 删除防火墙规则
-    uci -q delete firewall.warp_zone
-    uci -q delete firewall.lan_warp
-    uci -q delete firewall.warp_socks
-    uci commit firewall
-    
-    # 重载网络和防火墙
-    /etc/init.d/network reload 2>/dev/null
-    /etc/init.d/firewall reload 2>/dev/null
-    
-    logger -t warp "WARP interface removed successfully"
-}
-
-start_service() {
-    get_config
-    
-    [ "$ENABLED" != "1" ] && {
-        logger -t warp "WARP is disabled"
-        return 0
-    }
-    
-    setup_interface
-}
-
-stop_service() {
-    remove_interface
+    logger -t warp "Service stopped forcefully"
 }
 
 reload_service() {
     stop_service
-    sleep 1
     start_service
-}
-
-service_triggers() {
-    procd_add_reload_trigger "warp"
 }
