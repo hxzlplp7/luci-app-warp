@@ -30,13 +30,13 @@ OpenWrt 平台的 Cloudflare WARP LuCI 管理界面，支持全局流量接管�
 ### 方法一：一键安装脚本（推荐）
 
 ```bash
-wget -O- https://raw.githubusercontent.com/your-repo/luci-app-warp/main/install.sh | sh
+wget -O- https://raw.githubusercontent.com/hxzlplp7/luci-app-warp/main/install.sh | sh
 ```
 
 或者：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/your-repo/luci-app-warp/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/hxzlplp7/luci-app-warp/main/install.sh | sh
 ```
 
 ### 方法二：手动安装
@@ -52,7 +52,7 @@ opkg install wireguard-tools kmod-wireguard luci-proto-wireguard curl jsonfilter
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-repo/luci-app-warp.git /tmp/luci-app-warp
+git clone https://github.com/hxzlplp7/luci-app-warp.git /tmp/luci-app-warp
 
 # 复制文件
 cp -r /tmp/luci-app-warp/root/* /
