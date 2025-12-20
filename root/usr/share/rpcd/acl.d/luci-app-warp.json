@@ -20,6 +20,9 @@
                 ],
                 "/bin/netstat": [
                     "exec"
+                ],
+                "/bin/sh": [
+                    "exec"
                 ]
             },
             "uci": [
@@ -55,6 +58,9 @@
                     "exec"
                 ],
                 "/etc/init.d/warp": [
+                    "exec"
+                ],
+                "/bin/sh": [
                     "exec"
                 ]
             },

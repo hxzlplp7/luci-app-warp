@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-warp
-PKG_VERSION:=1.2.2
+PKG_VERSION:=1.2.3
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=hxzlplp7
