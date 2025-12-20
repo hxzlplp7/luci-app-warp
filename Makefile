@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-warp
-PKG_VERSION:=1.1.0
+PKG_VERSION:=1.2.0
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=hxzlplp7
@@ -23,7 +23,8 @@ endef
 
 define Package/$(PKG_NAME)/description
   LuCI interface for managing Cloudflare WARP via WireGuard with global proxy support.
-  Features include auto registration, global traffic proxy, China IP bypass, and WARP+ license upgrade.
+  Features include auto registration, global traffic proxy, China IP bypass, 
+  SOCKS5 proxy, pre-proxy support, and WARP+ license upgrade.
 endef
 
 define Package/$(PKG_NAME)/conffiles
@@ -52,18 +53,11 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_BIN) $(CURDIR)/root/usr/bin/warp-manager $(1)/usr/bin/warp-manager
 	$(INSTALL_BIN) $(CURDIR)/root/usr/bin/warp-update-china $(1)/usr/bin/warp-update-china
 	
-	# Install LuCI controller
-	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/controller
-	$(INSTALL_DATA) $(CURDIR)/luasrc/controller/warp.lua $(1)/usr/lib/lua/luci/controller/warp.lua
-	
-	# Install LuCI model
-	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/model/cbi/warp
-	$(INSTALL_DATA) $(CURDIR)/luasrc/model/cbi/warp/settings.lua $(1)/usr/lib/lua/luci/model/cbi/warp/settings.lua
-	
-	# Install LuCI views
-	$(INSTALL_DIR) $(1)/usr/lib/lua/luci/view/warp
-	$(INSTALL_DATA) $(CURDIR)/luasrc/view/warp/status.htm $(1)/usr/lib/lua/luci/view/warp/status.htm
-	$(INSTALL_DATA) $(CURDIR)/luasrc/view/warp/log.htm $(1)/usr/lib/lua/luci/view/warp/log.htm
+	# Install LuCI JS views (new style)
+	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/warp
+	$(INSTALL_DATA) $(CURDIR)/htdocs/luci-static/resources/view/warp/status.js $(1)/www/luci-static/resources/view/warp/status.js
+	$(INSTALL_DATA) $(CURDIR)/htdocs/luci-static/resources/view/warp/settings.js $(1)/www/luci-static/resources/view/warp/settings.js
+	$(INSTALL_DATA) $(CURDIR)/htdocs/luci-static/resources/view/warp/log.js $(1)/www/luci-static/resources/view/warp/log.js
 	
 	# Install ACL
 	$(INSTALL_DIR) $(1)/usr/share/rpcd/acl.d
@@ -72,6 +66,9 @@ define Package/$(PKG_NAME)/install
 	# Install menu
 	$(INSTALL_DIR) $(1)/usr/share/luci/menu.d
 	$(INSTALL_DATA) $(CURDIR)/root/usr/share/luci/menu.d/luci-app-warp.json $(1)/usr/share/luci/menu.d/luci-app-warp.json
+	
+	# Create warp data directory
+	$(INSTALL_DIR) $(1)/etc/warp
 endef
 
 define Package/$(PKG_NAME)/postinst
@@ -79,6 +76,7 @@ define Package/$(PKG_NAME)/postinst
 [ -n "$${IPKG_INSTROOT}" ] || {
 	/etc/init.d/warp enable 2>/dev/null
 	/etc/init.d/rpcd restart 2>/dev/null
+	rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
 }
 exit 0
 endef

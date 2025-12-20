@@ -2,9 +2,6 @@
     "luci-app-warp": {
         "description": "Grant access to WARP configuration",
         "read": {
-            "cbi": [
-                "warp"
-            ],
             "file": {
                 "/etc/config/warp": [
                     "read"
@@ -14,6 +11,15 @@
                 ],
                 "/usr/bin/warp-manager": [
                     "exec"
+                ],
+                "/usr/bin/logread": [
+                    "exec"
+                ],
+                "/usr/bin/wg": [
+                    "exec"
+                ],
+                "/bin/netstat": [
+                    "exec"
                 ]
             },
             "uci": [
@@ -22,7 +28,8 @@
             "ubus": {
                 "file": [
                     "read",
-                    "stat"
+                    "stat",
+                    "exec"
                 ],
                 "luci": [
                     "getInitList",
@@ -37,9 +44,6 @@
             }
         },
         "write": {
-            "cbi": [
-                "warp"
-            ],
             "file": {
                 "/etc/config/warp": [
                     "write"
@@ -48,6 +52,9 @@
                     "write"
                 ],
                 "/usr/bin/warp-manager": [
+                    "exec"
+                ],
+                "/etc/init.d/warp": [
                     "exec"
                 ]
             },
