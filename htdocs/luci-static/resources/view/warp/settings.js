@@ -113,11 +113,11 @@ return view.extend({
         // 前置代理
         s = m.section(form.NamedSection, 'config', 'warp', _('前置代理'));
         s.anonymous = true;
-        s.description = _('如果您的网络无法直接访问 WARP 服务器，可以配置一个前置代理');
+        s.description = _('通过本地已有的代理端口连接 WARP 服务器（如 Clash、v2ray 等提供的本地代理）');
 
         o = s.option(form.Flag, 'pre_proxy_enabled', _('启用前置代理'));
         o.default = '0';
-        o.description = _('通过代理服务器连接 WARP');
+        o.description = _('开启后 WARP 将通过指定的本地代理端口出站');
 
         o = s.option(form.ListValue, 'pre_proxy_type', _('代理类型'));
         o.value('socks5', 'SOCKS5');
@@ -127,22 +127,16 @@ return view.extend({
 
         o = s.option(form.Value, 'pre_proxy_addr', _('代理地址'));
         o.datatype = 'host';
+        o.default = '127.0.0.1';
         o.placeholder = '127.0.0.1';
         o.depends('pre_proxy_enabled', '1');
+        o.description = _('本地代理监听地址，通常是 127.0.0.1');
 
         o = s.option(form.Value, 'pre_proxy_port', _('代理端口'));
         o.datatype = 'port';
-        o.placeholder = '1080';
+        o.placeholder = '7890';
         o.depends('pre_proxy_enabled', '1');
-
-        o = s.option(form.Value, 'pre_proxy_user', _('用户名'));
-        o.depends('pre_proxy_enabled', '1');
-        o.rmempty = true;
-
-        o = s.option(form.Value, 'pre_proxy_pass', _('密码'));
-        o.password = true;
-        o.depends('pre_proxy_enabled', '1');
-        o.rmempty = true;
+        o.description = _('本地代理端口，如 Clash 的 7890 或 v2ray 的 10808');
 
         // 账户信息
         s = m.section(form.NamedSection, 'config', 'warp', _('账户信息'));
