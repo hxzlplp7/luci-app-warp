@@ -53,13 +53,46 @@ check_system() {
 
 install_opkg_packages() {
 	log "installing OpenWrt packages"
-	opkg update
-	opkg install luci-base ca-bundle curl jsonfilter kmod-tun unzip >/dev/null
+	if ! opkg update; then
+		warn "opkg update reported errors; continuing with the package lists that are available"
+	fi
+
+	install_opkg_package luci-base
+	install_opkg_package ca-bundle
+	install_opkg_package curl
+	install_opkg_package jsonfilter
+	install_opkg_package unzip
+
+	if [ ! -c /dev/net/tun ]; then
+		install_opkg_package kmod-tun
+	fi
 
 	# Optional helper for SOCKS mode. NAT uses the system firewall backend
 	# already present on the device: nftables on firewall4, iptables on firewall3.
-	opkg install microsocks >/dev/null 2>&1 || \
+	install_opkg_package microsocks optional || \
 		warn "microsocks was not installed; SOCKS5 mode may be unavailable"
+}
+
+opkg_package_installed() {
+	opkg status "$1" 2>/dev/null | grep -q "^Status: .* installed"
+}
+
+install_opkg_package() {
+	pkg="$1"
+	mode="${2:-required}"
+
+	if opkg_package_installed "$pkg"; then
+		return 0
+	fi
+
+	if opkg install "$pkg" >/dev/null; then
+		return 0
+	fi
+
+	if [ "$mode" = "optional" ]; then
+		return 1
+	fi
+	die "failed to install required package: $pkg"
 }
 
 usque_asset_arch() {
@@ -120,7 +153,9 @@ install_usque() {
 	usque_file="$(find "$tmpdir" -type f -name usque | head -n 1)"
 	[ -n "$usque_file" ] || die "downloaded usque archive did not contain a usque binary"
 
-	install -m 0755 "$usque_file" /usr/bin/usque
+	mkdir -p /usr/bin
+	cp "$usque_file" /usr/bin/usque
+	chmod 0755 /usr/bin/usque
 	rm -rf "$tmpdir"
 	ok "installed /usr/bin/usque"
 }
