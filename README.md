@@ -245,6 +245,10 @@ A:
 
 ## 📝 更新日志
 
+### v1.3.6
+
+- 修复 HTTP/2 模式下只保护 `endpoint_v4` 路由，未保护 `endpoint_h2_v4` 可能导致 endpoint 直连路由不完整的问题
+
 ### v1.3.5
 
 - 修复 IPK `postinst` 同步重启 `rpcd` 时可能导致 `opkg install` 卡在 `Configuring luci-app-warp` 的问题
