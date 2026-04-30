@@ -21,9 +21,10 @@ OpenWrt 平台的 Cloudflare WARP LuCI 管理界面，使用 `usque` 的 MASQUE 
 
 - OpenWrt 21.02 或更高版本
 - `usque` (Cloudflare MASQUE 客户端，OpenWrt 官方源通常不提供)
-- `curl`
 - `jsonfilter`
-- `kmod-tun`
+- `ca-bundle`
+- `kmod-tun` 或固件内置的 `/dev/net/tun`
+- 可选：`curl`（WARP+ License 和连接测试命令需要）、`microsocks`（SOCKS5 代理需要）
 
 ## 🚀 快速安装
 
@@ -45,8 +46,11 @@ curl -fsSL https://raw.githubusercontent.com/hxzlplp7/luci-app-warp/main/install
 
 ```bash
 opkg update
-opkg install luci-base curl jsonfilter kmod-tun ca-bundle microsocks
+opkg install luci-base jsonfilter ca-bundle
+opkg install curl microsocks || true
 ```
+
+`curl` 和 `microsocks` 是运行时可选组件；安装失败不会阻止 LuCI 应用安装，但对应功能不可用。如果 `ls -l /dev/net/tun` 不存在，再安装与当前固件内核完全匹配的 `kmod-tun`。很多定制固件已经内置 TUN，此时不需要额外安装 `kmod-tun`。
 
 `usque` 不在 OpenWrt 官方 feed 中。可先运行本项目的一键安装脚本让它自动下载上游预编译文件，或从 [Diniboy1123/usque releases](https://github.com/Diniboy1123/usque/releases) 下载匹配架构的 Linux zip，把其中的 `usque` 放到 `/usr/bin/usque` 并赋予执行权限。
 
@@ -161,7 +165,7 @@ warp-manager restart
 | `mtu` | MTU值 | `1280` |
 | `dns` | DNS服务器 | `1.1.1.1` |
 | `ipv6` | 启用IPv6 | `1` |
-| `global_proxy` | 全局代理模式 | `1` |
+| `global_proxy` | 全局代理模式 | `0` |
 | `bypass_china` | 绕过中国大陆IP | `0` |
 
 ### 配置文件
@@ -174,7 +178,7 @@ config warp 'config'
     option endpoint 'engage.cloudflareclient.com:2408'
     option dns '1.1.1.1'
     option ipv6 '1'
-    option global_proxy '1'
+    option global_proxy '0'
     option bypass_china '0'
     option address_v4 '172.16.0.x'
     option address_v6 '2606:4700:xxx'
@@ -231,6 +235,42 @@ A: 检查以下几点：
 2. 虚拟网络接口 (tun) 是否正确创建：`ip link show | grep tun`
 3. 防火墙规则是否正确下发到了 tun 接口上：firewall4/nftables 用 `nft list table inet luci_warp`，旧 firewall3/iptables 用 `iptables -t nat -S | grep tun`
 
+### Q: `opkg install /tmp/upload.ipk` 报 `cannot find dependency curl/kmod-tun` 或 `incompatible with the architectures configured`？
+
+A: 先确认设备 feeds 可用、包架构匹配，再安装：
+
+```bash
+opkg update
+opkg print-architecture
+opkg install luci-base jsonfilter ca-bundle
+opkg install curl microsocks || true
+ls -l /dev/net/tun || opkg install kmod-tun
+opkg install /tmp/upload.ipk
+```
+
+如果 `curl` 或 `microsocks` 找不到，可先忽略；v1.3.7 或更新版本不会因为这两个可选组件缺失而拒绝安装。如果 `kmod-tun` 找不到，但 `/dev/net/tun` 已存在，说明固件已经内置 TUN；旧版 IPK 会因为硬依赖 `kmod-tun` 被 opkg 拒绝安装。`Architecture: all` 应该能被标准 OpenWrt 接受，如果 `opkg print-architecture` 没有 `arch all 1`，需要先修复固件的 opkg 架构配置。
+
+### Q: 安装/启动后 OpenClash 失效怎么办？
+
+A: WARP 的全局接管会向主路由表写入 `0.0.0.0/1` 和 `128.0.0.0/1`，会和 OpenClash 抢流量。先恢复路由和防火墙：
+
+```bash
+/etc/init.d/warp stop 2>/dev/null
+/etc/init.d/warp disable 2>/dev/null
+uci set warp.config.enabled='0'
+uci set warp.config.global_proxy='0'
+uci commit warp
+killall usque 2>/dev/null
+killall microsocks 2>/dev/null
+ip route del 0.0.0.0/1 2>/dev/null
+ip route del 128.0.0.0/1 2>/dev/null
+nft delete table inet luci_warp 2>/dev/null
+/etc/init.d/firewall restart
+/etc/init.d/openclash restart
+```
+
+如果需要和 OpenClash 共存，不要同时开启 WARP 的“全局流量接管”和 OpenClash 的透明代理。可以二选一，或在确认 WARP SOCKS5 出口实测可用后，再把它作为 OpenClash 的上游代理。
+
 ### Q: 如何升级到WARP+？
 
 A: 在LuCI界面点击"应用License"，输入从WARP+订阅获取的License Key。
@@ -244,6 +284,12 @@ A:
 - 使用第三方生成器（不保证可用性）
 
 ## 📝 更新日志
+
+### v1.3.7
+
+- 将 IPK 架构声明改为标准全局 `PKGARCH:=all`，避免纯 LuCI 包被错误构建成目标架构包
+- 移除 IPK 对 `curl`、`kmod-tun`、`microsocks` 的硬依赖，改为运行时按功能检查，兼容 feeds 不完整或已内置 TUN 的定制固件
+- 默认关闭全局流量接管，降低与 OpenClash 等透明代理共存时的路由冲突风险
 
 ### v1.3.6
 

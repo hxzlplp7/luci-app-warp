@@ -4,11 +4,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-warp
-PKG_VERSION:=1.3.6
+PKG_VERSION:=1.3.7
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=hxzlplp7
 PKG_LICENSE:=GPL-3.0-or-later
+PKGARCH:=all
 
 include $(INCLUDE_DIR)/package.mk
 
@@ -17,8 +18,7 @@ define Package/$(PKG_NAME)
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI support for Cloudflare WARP via usque
-  DEPENDS:=+luci-base +curl +jsonfilter +kmod-tun +ca-bundle +microsocks
-  PKGARCH:=all
+  DEPENDS:=+luci-base +jsonfilter +ca-bundle
 endef
 
 define Package/$(PKG_NAME)/description

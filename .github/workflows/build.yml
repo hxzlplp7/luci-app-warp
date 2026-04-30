@@ -11,7 +11,7 @@ on:
 
 env:
   PACKAGE_NAME: luci-app-warp
-  VERSION: 1.3.1
+  VERSION: 1.3.7
 
 jobs:
   build:
@@ -126,20 +126,18 @@ jobs:
             - 🎨 现代化 LuCI 管理界面
             
             ### 安装方法
-            1. 下载对应架构的 ipk 文件
+            1. 下载 `luci-app-warp_*_all.ipk`
             2. 上传到路由器并安装：`opkg install luci-app-warp_*.ipk`
             3. 访问 LuCI -> 服务 -> Cloudflare WARP
             
             ### 架构说明
-            | 文件 | 适用设备 |
-            |------|----------|
-            | `*x86_64*` | x86 软路由 |
-            | `*aarch64*` | ARM64 设备 (R2S/R4S/树莓派4等) |
-            | `*arm_cortex-a7*` | ARM32 设备 (香橙派等) |
-            | `*mipsel_24kc*` | MT7621 设备 (小米路由器等) |
+            LuCI IPK 是 `Architecture: all`，不需要按 CPU 架构区分。
+            只有 `/usr/bin/usque` 二进制需要匹配设备架构。
             
             ### 依赖
-            `curl`, `jsonfilter`, `kmod-tun`, `iptables`, `microsocks` 会由 IPK 依赖安装。
+            `luci-base`, `jsonfilter`, `ca-bundle` 会由 IPK 依赖安装。
+            如果固件没有内置 TUN，需要另外安装与当前内核完全匹配的 `kmod-tun`。
+            `curl` 用于 WARP+ License 和连接测试，`microsocks` 用于 SOCKS5 代理；这两个组件缺失时对应功能不可用，但不会阻止 IPK 安装。
             OpenWrt 官方源没有 `usque` 包，需要先通过本项目 `install.sh` 或上游 release 安装 `/usr/bin/usque`。
           generate_release_notes: true
         env:

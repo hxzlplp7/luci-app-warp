@@ -59,9 +59,10 @@ install_opkg_packages() {
 
 	install_opkg_package luci-base
 	install_opkg_package ca-bundle
-	install_opkg_package curl
 	install_opkg_package jsonfilter
 	install_opkg_package unzip
+	install_opkg_package curl optional || \
+		warn "curl was not installed; WARP+ license update and connection test commands may be unavailable"
 
 	if [ ! -c /dev/net/tun ]; then
 		install_opkg_package kmod-tun

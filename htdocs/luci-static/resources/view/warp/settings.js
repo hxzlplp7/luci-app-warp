@@ -100,8 +100,8 @@ return view.extend({
         s.anonymous = true;
 
         o = s.option(form.Flag, 'global_proxy', _('全局代理'));
-        o.default = '1';
-        o.description = _('启用后，所有流量都将通过WARP');
+        o.default = '0';
+        o.description = _('启用后，所有流量都将通过WARP；与 OpenClash 等透明代理共存时建议关闭');
 
         o = s.option(form.Flag, 'bypass_china', _('绕过中国大陆IP'));
         o.default = '0';

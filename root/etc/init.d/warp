@@ -36,6 +36,15 @@ usque_pids() {
 	ps w 2>/dev/null | awk '/[u]sque/ && /nativetun/ {print $1}'
 }
 
+ensure_tun_available() {
+	modprobe tun >/dev/null 2>&1 || true
+
+	if [ ! -c /dev/net/tun ]; then
+		warp_log "Missing /dev/net/tun. Install kmod-tun or use firmware with TUN built in."
+		return 1
+	fi
+}
+
 force_stop_usque() {
 	pids="$(usque_pids)"
 	[ -n "$pids" ] || return 0
@@ -169,7 +178,7 @@ configure_runtime() {
 	config_get ADDRESS_V4 config address_v4 ""
 	config_get ADDRESS_V6 config address_v6 ""
 	config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
-	config_get GLOBAL_PROXY config global_proxy "1"
+	config_get GLOBAL_PROXY config global_proxy "0"
 	config_get SOCKS_ENABLED config socks_enabled "1"
 	config_get SOCKS_PORT config socks_port "1080"
 	config_get BYPASS_CHINA config bypass_china "0"
@@ -215,14 +224,18 @@ configure_runtime() {
 		/usr/bin/warp-update-china apply >/dev/null 2>&1 || true
 	fi
 
-	if [ "$SOCKS_ENABLED" = "1" ] && command -v microsocks >/dev/null 2>&1; then
-		if [ -n "$ADDRESS_V4" ]; then
-			microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
+	if [ "$SOCKS_ENABLED" = "1" ]; then
+		if command -v microsocks >/dev/null 2>&1; then
+			if [ -n "$ADDRESS_V4" ]; then
+				microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
+			else
+				microsocks -i 0.0.0.0 -p "$SOCKS_PORT" &
+			fi
+			echo $! > "$SOCKS_PID_FILE"
+			warp_log "Started microsocks on port $SOCKS_PORT"
 		else
-			microsocks -i 0.0.0.0 -p "$SOCKS_PORT" &
+			warp_log "microsocks is not installed; SOCKS5 proxy was not started"
 		fi
-		echo $! > "$SOCKS_PID_FILE"
-		warp_log "Started microsocks on port $SOCKS_PORT"
 	fi
 }
 
@@ -244,7 +257,7 @@ start_service() {
 		return 1
 	fi
 
-	modprobe tun >/dev/null 2>&1 || true
+	ensure_tun_available || return 1
 	mkdir -p "$RUNTIME_DIR"
 
 	end_host="${ENDPOINT%:*}"

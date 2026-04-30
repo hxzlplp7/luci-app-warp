@@ -46,6 +46,13 @@ need_jsonfilter() {
 	fi
 }
 
+need_curl() {
+	if ! command -v curl >/dev/null 2>&1; then
+		err "curl is required for this command"
+		return 1
+	fi
+}
+
 json_get() {
 	jsonfilter -i "$ACCOUNT_FILE" -e "$1" 2>/dev/null
 }
@@ -117,6 +124,7 @@ apply_license() {
 		return 1
 	}
 	need_jsonfilter || return 1
+	need_curl || return 1
 
 	ACCOUNT_ID="$(json_get '@.id')"
 	TOKEN="$(json_get '@.access_token')"
@@ -193,6 +201,8 @@ get_status() {
 
 test_connection() {
 	info "Testing WARP connectivity..."
+	need_curl || return 1
+
 	USQUE_INTERFACE="$(detect_tun_iface)"
 	if [ -z "$USQUE_INTERFACE" ]; then
 		err "no usque TUN interface found"
