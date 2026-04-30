@@ -73,6 +73,17 @@ return view.extend({
         o.rmempty = false;
         o.description = _('WARP 服务器端点地址和端口');
 
+        o = s.option(form.Flag, 'http2', _('使用 HTTP/2'));
+        o.default = '0';
+        o.rmempty = false;
+        o.description = _('通过 TCP/TLS 连接 WARP，适合 UDP/QUIC 443 被阻断或默认 MASQUE 一直超时的网络');
+
+        o = s.option(form.Value, 'sni_address', _('SNI 地址'));
+        o.datatype = 'hostname';
+        o.placeholder = 'consumer-masque.cloudflareclient.com';
+        o.rmempty = true;
+        o.description = _('留空使用 usque 默认值；如网络阻断默认 SNI，可填写自定义域名');
+
         o = s.option(form.Value, 'mtu', _('MTU'));
         o.datatype = 'range(1280,1500)';
         o.default = '1280';

@@ -174,6 +174,8 @@ configure_runtime() {
 start_service() {
 	config_load warp
 	config_get ENABLED config enabled 0
+	config_get HTTP2 config http2 "0"
+	config_get SNI_ADDRESS config sni_address ""
 	[ "$ENABLED" = "1" ] || return 0
 
 	if [ ! -x "$USQUE_BIN" ]; then
@@ -191,12 +193,18 @@ start_service() {
 
 	procd_open_instance "usque"
 	procd_set_param command "$USQUE_BIN" -c "$CONFIG_FILE" nativetun
+	[ "$HTTP2" = "1" ] && procd_append_param command --http2
+	[ -n "$SNI_ADDRESS" ] && procd_append_param command -s "$SNI_ADDRESS"
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1
 	procd_close_instance
 
-	warp_log "Started usque nativetun"
+	if [ "$HTTP2" = "1" ]; then
+		warp_log "Started usque nativetun using HTTP/2"
+	else
+		warp_log "Started usque nativetun using HTTP/3"
+	fi
 	configure_runtime &
 }
 

@@ -1,6 +1,8 @@
 config warp 'config'
 	option enabled '0'
 	option endpoint 'engage.cloudflareclient.com:2408'
+	option http2 '0'
+	option sni_address ''
 	option mtu '1280'
 	option dns '1.1.1.1'
 	option ipv6 '1'

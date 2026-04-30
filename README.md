@@ -128,6 +128,14 @@ warp-manager export
 warp-manager reset
 ```
 
+如果日志里反复出现 `Failed to connect tunnel: timeout: no recent network activity`，通常是 UDP/QUIC 443 被阻断。可在 LuCI 设置页启用 **使用 HTTP/2**，或命令行执行：
+
+```bash
+uci set warp.config.http2='1'
+uci commit warp
+warp-manager restart
+```
+
 ### 服务管理
 
 ```bash
@@ -236,6 +244,10 @@ A:
 - 使用第三方生成器（不保证可用性）
 
 ## 📝 更新日志
+
+### v1.3.3
+
+- 新增 HTTP/2 fallback 和自定义 SNI 设置，用于默认 HTTP/3/QUIC MASQUE 超时的网络
 
 ### v1.3.2
 
