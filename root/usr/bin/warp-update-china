@@ -8,9 +8,13 @@ RT_TABLES="/etc/iproute2/rt_tables"
 TABLE_ID="100"
 TABLE_NAME="china"
 RULE_PRIORITY="100"
+LOG_FILE="/var/log/warp.log"
 
 log() {
 	printf '%s\n' "$*"
+	mkdir -p /var/log 2>/dev/null || true
+	printf '%s warp-update-china: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE" 2>/dev/null || true
+	logger -t warp-update-china "$*" 2>/dev/null || true
 }
 
 detect_wan_route() {

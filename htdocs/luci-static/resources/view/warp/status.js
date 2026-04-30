@@ -6,18 +6,19 @@
 'require poll';
 'require rpc';
 
-var callWarpAPI = rpc.declare({
-    object: 'luci',
-    method: 'exec',
-    params: ['command'],
-    expect: { stdout: '' }
+var callServiceList = rpc.declare({
+    object: 'service',
+    method: 'list',
+    params: ['name'],
+    expect: { '': {} }
 });
 
 return view.extend({
     load: function () {
         return Promise.all([
             uci.load('warp'),
-            L.resolveDefault(fs.exec('/bin/sh', ['-c', 'ip link show | grep tun']), { code: 1, stdout: '' }),
+            L.resolveDefault(callServiceList('warp'), {}),
+            L.resolveDefault(fs.exec('/sbin/ip', ['link', 'show']), { code: 1, stdout: '' }),
             L.resolveDefault(fs.stat('/etc/warp/config.json'), null),
             L.resolveDefault(fs.exec('/bin/netstat', ['-tln']), { stdout: '' }),
             L.resolveDefault(fs.exec('/bin/cat', ['/proc/net/dev']), { stdout: '' }),
@@ -27,7 +28,8 @@ return view.extend({
 
     pollStatus: function () {
         return Promise.all([
-            L.resolveDefault(fs.exec('/bin/sh', ['-c', 'ip link show | grep tun']), { code: 1, stdout: '' }),
+            L.resolveDefault(callServiceList('warp'), {}),
+            L.resolveDefault(fs.exec('/sbin/ip', ['link', 'show']), { code: 1, stdout: '' }),
             L.resolveDefault(fs.stat('/etc/warp/config.json'), null),
             L.resolveDefault(fs.exec('/bin/netstat', ['-tln']), { stdout: '' }),
             L.resolveDefault(fs.exec('/bin/cat', ['/proc/net/dev']), { stdout: '' }),
@@ -48,39 +50,89 @@ return view.extend({
         return size.toFixed(2) + ' ' + units[i];
     },
 
-    updateStatusDisplay: function (data) {
-        var wgOutput = data[0].stdout || '';
-        var accountExists = data[1] !== null;
-        var netstatOutput = data[2].stdout || '';
-        var netDevOutput = data[3].stdout || '';
-        var tunIfaceName = (data[4].stdout || '').trim();
+    serviceIsRunning: function (serviceData) {
+        var service = serviceData ? serviceData.warp : null;
+        var instances = service ? service.instances : null;
 
-        var tunName = tunIfaceName || (wgOutput.match(/tun[0-9]+/) || [null])[0];
-        var isRunning = tunName !== null && wgOutput.indexOf(tunName) !== -1;
+        if (!instances)
+            return false;
+
+        for (var name in instances) {
+            if (instances[name] && instances[name].running)
+                return true;
+        }
+
+        return false;
+    },
+
+    serviceHasInfo: function (serviceData) {
+        return !!(serviceData && serviceData.warp && serviceData.warp.instances);
+    },
+
+    findTunName: function (ipOutput, runtimeTunName) {
+        var tunName = (runtimeTunName || '').trim();
+
+        if (tunName)
+            return tunName;
+
+        var match = (ipOutput || '').match(/\d+:\s+(tun[0-9]+)[:@]/);
+        return match ? match[1] : null;
+    },
+
+    isTunReady: function (ipOutput, tunName) {
+        if (!tunName)
+            return false;
+
+        ipOutput = ipOutput || '';
+        return ipOutput.indexOf(tunName + ':') !== -1 ||
+            ipOutput.indexOf(tunName + '@') !== -1;
+    },
+
+    getInterfaceTraffic: function (netDevOutput, tunName) {
+        var traffic = { rxBytes: 0, txBytes: 0 };
+
+        if (!tunName || !netDevOutput)
+            return traffic;
+
+        var devLines = netDevOutput.split('\n');
+        for (var i = 0; i < devLines.length; i++) {
+            if (devLines[i].indexOf(tunName + ':') !== -1) {
+                var stats = devLines[i].replace(':', ' ').trim().split(/\s+/);
+                traffic.rxBytes = parseInt(stats[1], 10) || 0;
+                traffic.txBytes = parseInt(stats[9], 10) || 0;
+                break;
+            }
+        }
+
+        return traffic;
+    },
+
+    updateStatusDisplay: function (data) {
+        var serviceData = data[0] || {};
+        var ipOutput = data[1].stdout || '';
+        var accountExists = data[2] !== null;
+        var netstatOutput = data[3].stdout || '';
+        var netDevOutput = data[4].stdout || '';
+        var tunIfaceName = (data[5].stdout || '').trim();
+
+        var tunName = this.findTunName(ipOutput, tunIfaceName);
+        var tunReady = this.isTunReady(ipOutput, tunName);
+        var hasServiceInfo = this.serviceHasInfo(serviceData);
+        var serviceRunning = this.serviceIsRunning(serviceData);
+        var isRunning = hasServiceInfo ? serviceRunning : tunReady;
+        var tunnelReady = isRunning && tunReady;
         
         var socksPort = uci.get('warp', 'config', 'socks_port') || '1080';
         var socksRunning = netstatOutput.indexOf(':' + socksPort) !== -1;
 
-        // 解析流量
-        var rxBytes = 0, txBytes = 0;
-        if (tunName && netDevOutput) {
-            var devLines = netDevOutput.split('\n');
-            for (var i = 0; i < devLines.length; i++) {
-                if (devLines[i].indexOf(tunName + ':') !== -1) {
-                    var stats = devLines[i].trim().split(/:?\s+/);
-                    rxBytes = parseInt(stats[1]) || 0;
-                    txBytes = parseInt(stats[9]) || 0;
-                    break;
-                }
-            }
-        }
+        var traffic = this.getInterfaceTraffic(netDevOutput, tunName);
 
         // 更新状态显示
         var statusEl = document.getElementById('warp-status');
         var connEl = document.getElementById('warp-connection');
         var accountEl = document.getElementById('warp-account');
         var socksEl = document.getElementById('warp-socks');
-        var handshakeEl = document.getElementById('warp-handshake');
+        var ifaceEl = document.getElementById('warp-interface');
         var transferEl = document.getElementById('warp-transfer');
 
         if (statusEl) {
@@ -90,11 +142,9 @@ return view.extend({
         }
 
         if (connEl) {
-            // 如果有接收到流量，认为已连接
-            var isConnected = isRunning && rxBytes > 0;
-            connEl.innerHTML = isConnected
-                ? '<span class="badge success">已连接</span>'
-                : (isRunning ? '<span class="badge warning">连接中...</span>'
+            connEl.innerHTML = tunnelReady
+                ? '<span class="badge success">隧道就绪</span>'
+                : (isRunning ? '<span class="badge warning">启动中...</span>'
                     : '<span class="badge error">未连接</span>');
         }
 
@@ -110,12 +160,12 @@ return view.extend({
                 : '<span class="badge warning">未启动</span>';
         }
 
-        if (handshakeEl) {
-            handshakeEl.textContent = isRunning ? _('MASQUE 协议无需握手') : '-';
+        if (ifaceEl) {
+            ifaceEl.textContent = tunnelReady ? tunName : '-';
         }
 
         if (transferEl) {
-            transferEl.textContent = 'RX: ' + this.formatSize(rxBytes) + ' | TX: ' + this.formatSize(txBytes);
+            transferEl.textContent = 'RX: ' + this.formatSize(traffic.rxBytes) + ' | TX: ' + this.formatSize(traffic.txBytes);
         }
     },
 
@@ -125,39 +175,53 @@ return view.extend({
             E('p', { 'class': 'spinning' }, _('正在执行操作...'))
         ]);
 
-        var cmd;
+        var command = '/usr/bin/warp-manager';
+        var args;
         switch (action) {
             case 'register':
-                cmd = '/usr/bin/warp-manager register';
+                args = ['register'];
                 break;
             case 'start':
-                cmd = '/etc/init.d/warp start';
+                args = ['start'];
                 break;
             case 'stop':
-                cmd = '/etc/init.d/warp stop';
+                args = ['stop'];
                 break;
             case 'restart':
-                cmd = '/etc/init.d/warp restart';
+                args = ['restart'];
                 break;
             case 'test':
-                cmd = 'curl -s --socks5 127.0.0.1:' + (uci.get('warp', 'config', 'socks_port') || '1080') + ' --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || curl -s --max-time 10 https://www.cloudflare.com/cdn-cgi/trace';
+                args = ['test'];
                 break;
             case 'reset':
-                cmd = '/usr/bin/warp-manager reset';
+                args = ['reset'];
                 break;
             default:
                 ui.hideModal();
                 return;
         }
 
-        return fs.exec('/bin/sh', ['-c', cmd]).then(function (res) {
+        return fs.exec(command, args).then(function (res) {
             ui.hideModal();
+
+            if (res.code) {
+                ui.showModal(_('操作失败'), [
+                    E('pre', { 'style': 'white-space: pre-wrap;' }, res.stderr || res.stdout || _('命令执行失败')),
+                    E('div', { 'class': 'right' }, [
+                        E('button', {
+                            'class': 'btn',
+                            'click': ui.hideModal
+                        }, _('关闭'))
+                    ])
+                ]);
+                return;
+            }
 
             if (action === 'test') {
                 var output = res.stdout || '';
-                var warpStatus = output.match(/warp=([^\n]+)/);
-                var ip = output.match(/ip=([^\n]+)/);
-                var loc = output.match(/loc=([^\n]+)/);
+                var warpStatus = output.match(/(?:warp=|WARP:\s*)([^\n]+)/i);
+                var ip = output.match(/(?:ip=|IP:\s*)([^\n]+)/i);
+                var loc = output.match(/(?:loc=|Location:\s*)([^\n]+)/i);
 
                 ui.showModal(_('连接测试结果'), [
                     E('div', { 'class': 'cbi-section' }, [
@@ -182,8 +246,11 @@ return view.extend({
                     ])
                 ]);
             } else {
-                ui.addNotification(null, E('p', _('操作完成')), 'success');
-                self.pollStatus();
+                ui.addNotification(null, E('pre', { 'style': 'white-space: pre-wrap;' },
+                    res.stdout || _('操作完成')), 'success');
+                return uci.load('warp').then(function() {
+                    return self.pollStatus();
+                });
             }
         }).catch(function (e) {
             ui.hideModal();
@@ -193,11 +260,21 @@ return view.extend({
 
     render: function (data) {
         var self = this;
-        var wgOutput = data[1].stdout || '';
-        var accountExists = data[2] !== null;
+        var serviceData = data[1] || {};
+        var ipOutput = data[2].stdout || '';
+        var accountExists = data[3] !== null;
+        var netstatOutput = data[4].stdout || '';
+        var netDevOutput = data[5].stdout || '';
+        var tunIfaceName = (data[6].stdout || '').trim();
 
-        var isRunning = wgOutput.indexOf('tun') !== -1;
-        var hasHandshake = isRunning;
+        var tunName = this.findTunName(ipOutput, tunIfaceName);
+        var tunReady = this.isTunReady(ipOutput, tunName);
+        var hasServiceInfo = this.serviceHasInfo(serviceData);
+        var isRunning = hasServiceInfo ? this.serviceIsRunning(serviceData) : tunReady;
+        var tunnelReady = isRunning && tunReady;
+        var socksPort = uci.get('warp', 'config', 'socks_port') || '1080';
+        var socksRunning = netstatOutput.indexOf(':' + socksPort) !== -1;
+        var traffic = this.getInterfaceTraffic(netDevOutput, tunName);
 
         var ipv4 = uci.get('warp', 'config', 'address_v4') || '-';
         var ipv6 = uci.get('warp', 'config', 'address_v6') || '-';
@@ -239,13 +316,13 @@ return view.extend({
                     E('div', { 'class': 'status-row' }, [
                         E('span', {}, _('连接状态')),
                         E('span', { 'id': 'warp-connection' },
-                            hasHandshake ? E('span', { 'class': 'badge success' }, _('已连接'))
-                                : (isRunning ? E('span', { 'class': 'badge warning' }, _('连接中...'))
+                            tunnelReady ? E('span', { 'class': 'badge success' }, _('隧道就绪'))
+                                : (isRunning ? E('span', { 'class': 'badge warning' }, _('启动中...'))
                                     : E('span', { 'class': 'badge error' }, _('未连接'))))
                     ]),
                     E('div', { 'class': 'status-row' }, [
-                        E('span', {}, _('最后握手')),
-                        E('span', { 'id': 'warp-handshake' }, '-')
+                        E('span', {}, _('隧道接口')),
+                        E('span', { 'id': 'warp-interface' }, tunnelReady ? tunName : '-')
                     ])
                 ]),
 
@@ -253,7 +330,7 @@ return view.extend({
                     E('h4', {}, '📊 ' + _('流量统计')),
                     E('div', { 'class': 'status-row' }, [
                         E('span', {}, _('传输')),
-                        E('span', { 'id': 'warp-transfer' }, '-')
+                        E('span', { 'id': 'warp-transfer' }, 'RX: ' + this.formatSize(traffic.rxBytes) + ' | TX: ' + this.formatSize(traffic.txBytes))
                     ])
                 ]),
 
@@ -279,7 +356,9 @@ return view.extend({
                     E('h4', {}, '🧦 ' + _('SOCKS5 代理')),
                     E('div', { 'class': 'status-row' }, [
                         E('span', {}, _('代理状态')),
-                        E('span', { 'id': 'warp-socks' }, E('span', { 'class': 'badge warning' }, _('检查中...')))
+                        E('span', { 'id': 'warp-socks' },
+                            socksRunning ? E('span', { 'class': 'badge success' }, _('运行中 (端口 ') + socksPort + ')')
+                                : E('span', { 'class': 'badge warning' }, _('未启动')))
                     ])
                 ])
             ]),

@@ -24,6 +24,12 @@
                 "/usr/bin/warp-update-china": [
                     "exec"
                 ],
+                "/usr/bin/warp-log": [
+                    "exec"
+                ],
+                "/var/log/warp.log": [
+                    "read"
+                ],
                 "/bin/netstat": [
                     "exec"
                 ],

@@ -173,6 +173,7 @@ install_app() {
 
 	download "$REPO_RAW/root/usr/bin/warp-manager" /usr/bin/warp-manager
 	download "$REPO_RAW/root/usr/bin/warp-update-china" /usr/bin/warp-update-china
+	download "$REPO_RAW/root/usr/bin/warp-log" /usr/bin/warp-log
 	download "$REPO_RAW/root/etc/init.d/warp" /etc/init.d/warp
 	download "$REPO_RAW/root/etc/init.d/warp-cron" /etc/init.d/warp-cron
 
@@ -188,7 +189,7 @@ install_app() {
 	download "$REPO_RAW/htdocs/luci-static/resources/view/warp/settings.js" /www/luci-static/resources/view/warp/settings.js
 	download "$REPO_RAW/htdocs/luci-static/resources/view/warp/log.js" /www/luci-static/resources/view/warp/log.js
 
-	chmod 0755 /usr/bin/warp-manager /usr/bin/warp-update-china
+	chmod 0755 /usr/bin/warp-manager /usr/bin/warp-update-china /usr/bin/warp-log
 	chmod 0755 /etc/init.d/warp /etc/init.d/warp-cron
 
 	/etc/init.d/warp enable >/dev/null 2>&1 || true

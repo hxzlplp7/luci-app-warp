@@ -1,18 +1,21 @@
 'use strict';
 'require view';
 'require fs';
-'require ui';
 'require poll';
+
+function readLogs() {
+    return L.resolveDefault(fs.exec('/usr/bin/warp-log', ['300']), { stdout: '' }).then(function(res) {
+        return res.stdout || _('No log data available');
+    });
+}
 
 return view.extend({
     load: function() {
-        return Promise.all([
-            L.resolveDefault(fs.exec('/sbin/logread', ['-e', 'warp|usque']), { stdout: '' })
-        ]);
+        return readLogs();
     },
 
     render: function(data) {
-        var logData = data[0].stdout || _('No log data available');
+        var logData = data || _('No log data available');
         
         var logTextarea = E('textarea', {
             'id': 'syslog',
@@ -31,10 +34,10 @@ return view.extend({
         poll.add(L.bind(function() {
             var checkbox = document.getElementById('auto-refresh');
             if (checkbox && checkbox.checked) {
-                                return fs.exec('/sbin/logread', ['-e', 'warp|usque']).then(function(res) {
+                return readLogs().then(function(logData) {
                     var textarea = document.getElementById('syslog');
                     if (textarea) {
-                        textarea.value = res.stdout || _('No log data available');
+                        textarea.value = logData;
                         textarea.scrollTop = textarea.scrollHeight;
                     }
                 });
@@ -55,10 +58,10 @@ return view.extend({
                         E('button', {
                             'class': 'btn cbi-button cbi-button-action',
                             'click': function() {
-                return fs.exec('/sbin/logread', ['-e', 'warp|usque']).then(function(res) {
+                                return readLogs().then(function(logData) {
                                     var textarea = document.getElementById('syslog');
                                     if (textarea) {
-                                        textarea.value = res.stdout || _('No log data available');
+                                        textarea.value = logData;
                                         textarea.scrollTop = textarea.scrollHeight;
                                     }
                                 });

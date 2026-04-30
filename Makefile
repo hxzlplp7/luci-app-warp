@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-warp
-PKG_VERSION:=1.3.1
+PKG_VERSION:=1.3.2
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=hxzlplp7
@@ -55,6 +55,7 @@ define Package/$(PKG_NAME)/install
 	$(INSTALL_DIR) $(1)/usr/bin
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/usr/bin/warp-manager $(1)/usr/bin/warp-manager
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/usr/bin/warp-update-china $(1)/usr/bin/warp-update-china
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/usr/bin/warp-log $(1)/usr/bin/warp-log
 	
 	# Install LuCI JS views
 	$(INSTALL_DIR) $(1)/www/luci-static/resources/view/warp

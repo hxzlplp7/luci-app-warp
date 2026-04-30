@@ -1,0 +1,42 @@
+#!/bin/sh
+# Print luci-app-warp related logs from syslog, with a file fallback.
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+LOG_FILE="/var/log/warp.log"
+PATTERN="warp|usque|microsocks"
+LINES="${1:-200}"
+
+case "$LINES" in
+	''|*[!0-9]*)
+		LINES=200
+		;;
+esac
+[ "$LINES" -gt 0 ] 2>/dev/null || LINES=200
+[ "$LINES" -le 2000 ] 2>/dev/null || LINES=2000
+
+tmp="/tmp/warp-log.$$"
+trap 'rm -f "$tmp"' EXIT INT TERM
+
+LOGREAD=""
+if command -v logread >/dev/null 2>&1; then
+	LOGREAD="$(command -v logread)"
+elif [ -x /sbin/logread ]; then
+	LOGREAD="/sbin/logread"
+elif [ -x /usr/sbin/logread ]; then
+	LOGREAD="/usr/sbin/logread"
+fi
+
+if [ -n "$LOGREAD" ]; then
+	"$LOGREAD" 2>/dev/null | grep -Ei "$PATTERN" | tail -n "$LINES" > "$tmp" 2>/dev/null || true
+	if [ -s "$tmp" ]; then
+		cat "$tmp"
+		exit 0
+	fi
+fi
+
+if [ -r "$LOG_FILE" ]; then
+	tail -n "$LINES" "$LOG_FILE" 2>/dev/null
+	exit 0
+fi
+
+printf '%s\n' "No WARP logs found. Start or restart the service, then refresh this page."

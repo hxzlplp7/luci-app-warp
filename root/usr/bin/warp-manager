@@ -215,11 +215,39 @@ test_connection() {
 	printf '%s\n' "Location: ${LOC:-unknown}"
 }
 
+set_enabled() {
+	value="$1"
+
+	[ -f "$UCI_CONFIG" ] || touch "$UCI_CONFIG"
+	uci -q get warp.config >/dev/null 2>&1 || uci set warp.config='warp'
+	uci set warp.config.enabled="$value"
+	uci commit warp
+}
+
+start_service() {
+	set_enabled 1
+	/etc/init.d/warp start
+	ok "service start requested"
+}
+
+stop_service() {
+	set_enabled 0
+	/etc/init.d/warp stop
+	ok "service stopped and disabled in UCI"
+}
+
+restart_service() {
+	set_enabled 1
+	/etc/init.d/warp restart
+	ok "service restart requested"
+}
+
 reset_account() {
 	warn "Removing WARP account config and stopping the service..."
 	/etc/init.d/warp stop 2>/dev/null || true
 	rm -f "$ACCOUNT_FILE"
 
+	set_enabled 0
 	uci delete warp.config.private_key 2>/dev/null
 	uci delete warp.config.public_key 2>/dev/null
 	uci delete warp.config.reserved 2>/dev/null
@@ -241,11 +269,14 @@ export_config() {
 
 usage() {
 	cat <<EOF
-Usage: $0 {register|license <key>|status|test|reset|export}
+Usage: $0 {register|license <key>|start|stop|restart|status|test|reset|export}
 
 Commands:
   register       Register a new WARP account with usque
   license <key>  Apply a WARP+ license key
+  start          Enable WARP in UCI and start the service
+  stop           Stop the service and disable WARP in UCI
+  restart        Enable WARP in UCI and restart the service
   status         Show service and account status
   test           Test WARP connectivity
   reset          Delete the local WARP account config
@@ -259,6 +290,15 @@ case "${1:-}" in
 		;;
 	license)
 		apply_license "${2:-}"
+		;;
+	start)
+		start_service
+		;;
+	stop)
+		stop_service
+		;;
+	restart)
+		restart_service
 		;;
 	status)
 		get_status

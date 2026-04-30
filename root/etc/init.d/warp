@@ -10,7 +10,14 @@ USQUE_BIN="/usr/bin/usque"
 CONFIG_FILE="/etc/warp/config.json"
 SOCKS_PID_FILE="/var/run/warp-socks.pid"
 RUNTIME_DIR="/var/run/warp"
+LOG_FILE="/var/log/warp.log"
 NFT_TABLE="luci_warp"
+
+warp_log() {
+	mkdir -p /var/log 2>/dev/null || true
+	printf '%s warp: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE" 2>/dev/null || true
+	logger -t warp "$*" 2>/dev/null || true
+}
 
 find_usque_iface() {
 	if [ -s "$RUNTIME_DIR/tun_iface" ]; then
@@ -63,21 +70,21 @@ setup_masquerade() {
 		if nft add table inet "$NFT_TABLE" >/dev/null 2>&1 && \
 			nft add chain inet "$NFT_TABLE" postrouting '{ type nat hook postrouting priority 100; policy accept; }' >/dev/null 2>&1 && \
 			nft add rule inet "$NFT_TABLE" postrouting meta nfproto ipv4 oifname "$tun_iface" masquerade >/dev/null 2>&1; then
-			logger -t warp "Installed nftables masquerade for $tun_iface"
+			warp_log "Installed nftables masquerade for $tun_iface"
 			return 0
 		fi
-		logger -t warp "Failed to install nftables masquerade rule"
+		warp_log "Failed to install nftables masquerade rule"
 		nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
 	fi
 
 	if command -v iptables >/dev/null 2>&1; then
 		iptables -t nat -C POSTROUTING -o "$tun_iface" -j MASQUERADE >/dev/null 2>&1 || \
 			iptables -t nat -A POSTROUTING -o "$tun_iface" -j MASQUERADE >/dev/null 2>&1 || true
-		logger -t warp "Installed iptables masquerade for $tun_iface"
+		warp_log "Installed iptables masquerade for $tun_iface"
 		return 0
 	fi
 
-	logger -t warp "No nftables or iptables command found; LAN forwarding may not be masqueraded"
+	warp_log "No nftables or iptables command found; LAN forwarding may not be masqueraded"
 }
 
 teardown_masquerade() {
@@ -114,13 +121,13 @@ configure_runtime() {
 	done
 
 	if [ -z "$USQ_IF" ]; then
-		logger -t warp "Failed to find usque TUN interface after ${max_wait}s"
+		warp_log "Failed to find usque TUN interface after ${max_wait}s"
 		exit 1
 	fi
 
 	mkdir -p "$RUNTIME_DIR"
 	echo "$USQ_IF" > "$RUNTIME_DIR/tun_iface"
-	logger -t warp "usque interface created: $USQ_IF"
+	warp_log "usque interface created: $USQ_IF"
 
 	[ -n "$ADDRESS_V4" ] && ip addr add "$ADDRESS_V4/32" dev "$USQ_IF" 2>/dev/null || true
 	[ -n "$ADDRESS_V6" ] && ip -6 addr add "$ADDRESS_V6/128" dev "$USQ_IF" 2>/dev/null || true
@@ -135,10 +142,10 @@ configure_runtime() {
 	if [ -n "$wan_if" ] && [ -n "$end_ip" ]; then
 		if [ -n "$wan_gw" ]; then
 			ip route replace "$end_ip/32" via "$wan_gw" dev "$wan_if" 2>/dev/null || true
-			logger -t warp "Added direct route to endpoint $end_ip via $wan_gw dev $wan_if"
+			warp_log "Added direct route to endpoint $end_ip via $wan_gw dev $wan_if"
 		else
 			ip route replace "$end_ip/32" dev "$wan_if" 2>/dev/null || true
-			logger -t warp "Added direct route to endpoint $end_ip dev $wan_if"
+			warp_log "Added direct route to endpoint $end_ip dev $wan_if"
 		fi
 	fi
 
@@ -160,7 +167,7 @@ configure_runtime() {
 			microsocks -i 0.0.0.0 -p "$SOCKS_PORT" &
 		fi
 		echo $! > "$SOCKS_PID_FILE"
-		logger -t warp "Started microsocks on port $SOCKS_PORT"
+		warp_log "Started microsocks on port $SOCKS_PORT"
 	fi
 }
 
@@ -170,12 +177,12 @@ start_service() {
 	[ "$ENABLED" = "1" ] || return 0
 
 	if [ ! -x "$USQUE_BIN" ]; then
-		logger -t warp "Missing usque binary at $USQUE_BIN"
+		warp_log "Missing usque binary at $USQUE_BIN"
 		return 1
 	fi
 
 	if [ ! -f "$CONFIG_FILE" ]; then
-		logger -t warp "Missing $CONFIG_FILE. Run warp-manager register first."
+		warp_log "Missing $CONFIG_FILE. Run warp-manager register first."
 		return 1
 	fi
 
@@ -189,7 +196,7 @@ start_service() {
 	procd_set_param stderr 1
 	procd_close_instance
 
-	logger -t warp "Started usque nativetun"
+	warp_log "Started usque nativetun"
 	configure_runtime &
 }
 
@@ -216,7 +223,7 @@ stop_service() {
 
 	[ -x /usr/bin/warp-update-china ] && /usr/bin/warp-update-china clear >/dev/null 2>&1 || true
 	rm -f "$RUNTIME_DIR/tun_iface"
-	logger -t warp "Service stopped"
+	warp_log "Service stopped"
 }
 
 reload_service() {
