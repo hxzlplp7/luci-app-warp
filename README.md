@@ -245,6 +245,10 @@ A:
 
 ## 📝 更新日志
 
+### v1.3.5
+
+- 修复 IPK `postinst` 同步重启 `rpcd` 时可能导致 `opkg install` 卡在 `Configuring luci-app-warp` 的问题
+
 ### v1.3.4
 
 - 修复 `usque` 连接超时循环中停止/重启可能卡住的问题，停止时会在短超时后清理残留进程
