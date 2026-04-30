@@ -28,6 +28,31 @@ find_usque_iface() {
 	ip link show 2>/dev/null | awk -F': ' '/^[0-9]+: tun[0-9]+/ {print $2; exit}'
 }
 
+usque_pids() {
+	if command -v pgrep >/dev/null 2>&1; then
+		pgrep -f "usque.*nativetun" 2>/dev/null && return
+	fi
+
+	ps w 2>/dev/null | awk '/[u]sque/ && /nativetun/ {print $1}'
+}
+
+force_stop_usque() {
+	pids="$(usque_pids)"
+	[ -n "$pids" ] || return 0
+
+	kill $pids 2>/dev/null || true
+	count=0
+	while [ "$count" -lt 5 ]; do
+		sleep 1
+		pids="$(usque_pids)"
+		[ -z "$pids" ] && return 0
+		count=$((count + 1))
+	done
+
+	warp_log "Force killing stuck usque process: $pids"
+	kill -9 $pids 2>/dev/null || true
+}
+
 find_wan_default_route() {
 	tun_iface="$1"
 	ip route show default | awk -v tun="$tun_iface" '
@@ -198,6 +223,7 @@ start_service() {
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1
+	procd_set_param term_timeout 5
 	procd_close_instance
 
 	if [ "$HTTP2" = "1" ]; then
@@ -230,6 +256,7 @@ stop_service() {
 	[ -n "$end_ip" ] && ip route del "$end_ip/32" >/dev/null 2>&1 || true
 
 	[ -x /usr/bin/warp-update-china ] && /usr/bin/warp-update-china clear >/dev/null 2>&1 || true
+	force_stop_usque
 	rm -f "$RUNTIME_DIR/tun_iface"
 	warp_log "Service stopped"
 }
