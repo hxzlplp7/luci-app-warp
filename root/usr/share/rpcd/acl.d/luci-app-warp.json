@@ -18,7 +18,10 @@
                 "/usr/sbin/logread": [
                     "exec"
                 ],
-                "/usr/bin/wg": [
+                "/usr/bin/usque": [
+                    "exec"
+                ],
+                "/usr/bin/warp-update-china": [
                     "exec"
                 ],
                 "/bin/netstat": [
@@ -31,6 +34,12 @@
                     "exec"
                 ],
                 "/sbin/ip": [
+                    "exec"
+                ],
+                "/sbin/nft": [
+                    "exec"
+                ],
+                "/usr/sbin/nft": [
                     "exec"
                 ],
                 "/usr/sbin/iptables": [
@@ -80,6 +89,12 @@
                     "exec"
                 ],
                 "/sbin/ip": [
+                    "exec"
+                ],
+                "/sbin/nft": [
+                    "exec"
+                ],
+                "/usr/sbin/nft": [
                     "exec"
                 ],
                 "/usr/sbin/iptables": [

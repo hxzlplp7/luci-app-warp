@@ -1,11 +1,31 @@
 #!/bin/sh /etc/rc.common
-# WARP Cron Job for China IP update
-# Copyright (C) 2024
+# Cron helper for luci-app-warp China IP updates.
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 START=99
+CRON_LINE="0 3 * * 0 /usr/bin/warp-update-china >/dev/null 2>&1"
+
+add_cron() {
+	mkdir -p /etc/crontabs
+	touch /etc/crontabs/root
+	grep -Fq "$CRON_LINE" /etc/crontabs/root || echo "$CRON_LINE" >> /etc/crontabs/root
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+}
+
+remove_cron() {
+	[ -f /etc/crontabs/root ] || return 0
+	sed -i '/warp-update-china/d' /etc/crontabs/root
+	/etc/init.d/cron restart >/dev/null 2>&1 || true
+}
 
 boot() {
-    # 每周日凌�?点更新中国IP列表
-    echo "0 3 * * 0 /usr/bin/warp-update-china >/dev/null 2>&1" >> /etc/crontabs/root
-    /etc/init.d/cron restart
+	add_cron
+}
+
+start() {
+	add_cron
+}
+
+stop() {
+	remove_cron
 }

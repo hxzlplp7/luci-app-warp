@@ -1,5 +1,5 @@
 #!/bin/sh /etc/rc.common
-# Copyright (C) 2024
+# Cloudflare WARP service for OpenWrt using usque.
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 START=99
@@ -9,149 +9,217 @@ USE_PROCD=1
 USQUE_BIN="/usr/bin/usque"
 CONFIG_FILE="/etc/warp/config.json"
 SOCKS_PID_FILE="/var/run/warp-socks.pid"
+RUNTIME_DIR="/var/run/warp"
+NFT_TABLE="luci_warp"
+
+find_usque_iface() {
+	if [ -s "$RUNTIME_DIR/tun_iface" ]; then
+		cat "$RUNTIME_DIR/tun_iface"
+		return
+	fi
+
+	ip link show 2>/dev/null | awk -F': ' '/^[0-9]+: tun[0-9]+/ {print $2; exit}'
+}
+
+find_wan_default_route() {
+	tun_iface="$1"
+	ip route show default | awk -v tun="$tun_iface" '
+		{
+			gw = "";
+			dev = "";
+			for (i = 1; i <= NF; i++) {
+				if ($i == "via") gw = $(i + 1);
+				if ($i == "dev") dev = $(i + 1);
+			}
+			if (dev != "" && dev != tun) {
+				print gw "|" dev;
+				exit;
+			}
+		}'
+}
+
+resolve_endpoint_ip() {
+	endpoint_host="$1"
+	endpoint_ip=""
+
+	if command -v jsonfilter >/dev/null 2>&1 && [ -f "$CONFIG_FILE" ]; then
+		endpoint_ip="$(jsonfilter -i "$CONFIG_FILE" -e '@.endpoint_v4' 2>/dev/null)"
+	fi
+	[ -n "$endpoint_ip" ] && {
+		printf '%s\n' "$endpoint_ip"
+		return
+	}
+
+	endpoint_ip="$(nslookup "$endpoint_host" 2>/dev/null | awk '/^Address[[:space:]]+[0-9]+:/ {print $3} /^Address[0-9]*:/ {print $2}' | tail -n 1)"
+	[ -z "$endpoint_ip" ] && endpoint_ip="$(resolveip -4 "$endpoint_host" 2>/dev/null | head -n 1)"
+	printf '%s\n' "$endpoint_ip"
+}
+
+setup_masquerade() {
+	tun_iface="$1"
+
+	if command -v nft >/dev/null 2>&1; then
+		nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
+		if nft add table inet "$NFT_TABLE" >/dev/null 2>&1 && \
+			nft add chain inet "$NFT_TABLE" postrouting '{ type nat hook postrouting priority 100; policy accept; }' >/dev/null 2>&1 && \
+			nft add rule inet "$NFT_TABLE" postrouting meta nfproto ipv4 oifname "$tun_iface" masquerade >/dev/null 2>&1; then
+			logger -t warp "Installed nftables masquerade for $tun_iface"
+			return 0
+		fi
+		logger -t warp "Failed to install nftables masquerade rule"
+		nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
+	fi
+
+	if command -v iptables >/dev/null 2>&1; then
+		iptables -t nat -C POSTROUTING -o "$tun_iface" -j MASQUERADE >/dev/null 2>&1 || \
+			iptables -t nat -A POSTROUTING -o "$tun_iface" -j MASQUERADE >/dev/null 2>&1 || true
+		logger -t warp "Installed iptables masquerade for $tun_iface"
+		return 0
+	fi
+
+	logger -t warp "No nftables or iptables command found; LAN forwarding may not be masqueraded"
+}
+
+teardown_masquerade() {
+	tun_iface="$1"
+
+	if command -v nft >/dev/null 2>&1; then
+		nft delete table inet "$NFT_TABLE" >/dev/null 2>&1 || true
+	fi
+
+	if [ -n "$tun_iface" ] && command -v iptables >/dev/null 2>&1; then
+		iptables -t nat -D POSTROUTING -o "$tun_iface" -j MASQUERADE >/dev/null 2>&1 || true
+	fi
+}
+
+configure_runtime() {
+	config_load warp
+	config_get ADDRESS_V4 config address_v4 ""
+	config_get ADDRESS_V6 config address_v6 ""
+	config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
+	config_get GLOBAL_PROXY config global_proxy "1"
+	config_get SOCKS_ENABLED config socks_enabled "1"
+	config_get SOCKS_PORT config socks_port "1080"
+	config_get BYPASS_CHINA config bypass_china "0"
+
+	max_wait=30
+	count=0
+	USQ_IF=""
+
+	while [ "$count" -lt "$max_wait" ]; do
+		USQ_IF="$(find_usque_iface)"
+		[ -n "$USQ_IF" ] && break
+		sleep 1
+		count=$((count + 1))
+	done
+
+	if [ -z "$USQ_IF" ]; then
+		logger -t warp "Failed to find usque TUN interface after ${max_wait}s"
+		exit 1
+	fi
+
+	mkdir -p "$RUNTIME_DIR"
+	echo "$USQ_IF" > "$RUNTIME_DIR/tun_iface"
+	logger -t warp "usque interface created: $USQ_IF"
+
+	[ -n "$ADDRESS_V4" ] && ip addr add "$ADDRESS_V4/32" dev "$USQ_IF" 2>/dev/null || true
+	[ -n "$ADDRESS_V6" ] && ip -6 addr add "$ADDRESS_V6/128" dev "$USQ_IF" 2>/dev/null || true
+	ip link set "$USQ_IF" up 2>/dev/null || true
+
+	end_host="${ENDPOINT%:*}"
+	wan_route="$(find_wan_default_route "$USQ_IF")"
+	wan_gw="${wan_route%%|*}"
+	wan_if="${wan_route#*|}"
+	end_ip="$(resolve_endpoint_ip "$end_host")"
+
+	if [ -n "$wan_if" ] && [ -n "$end_ip" ]; then
+		if [ -n "$wan_gw" ]; then
+			ip route replace "$end_ip/32" via "$wan_gw" dev "$wan_if" 2>/dev/null || true
+			logger -t warp "Added direct route to endpoint $end_ip via $wan_gw dev $wan_if"
+		else
+			ip route replace "$end_ip/32" dev "$wan_if" 2>/dev/null || true
+			logger -t warp "Added direct route to endpoint $end_ip dev $wan_if"
+		fi
+	fi
+
+	if [ "$GLOBAL_PROXY" = "1" ]; then
+		ip route replace 0.0.0.0/1 dev "$USQ_IF" 2>/dev/null || true
+		ip route replace 128.0.0.0/1 dev "$USQ_IF" 2>/dev/null || true
+	fi
+
+	setup_masquerade "$USQ_IF"
+
+	if [ "$BYPASS_CHINA" = "1" ] && [ -x /usr/bin/warp-update-china ]; then
+		/usr/bin/warp-update-china apply >/dev/null 2>&1 || true
+	fi
+
+	if [ "$SOCKS_ENABLED" = "1" ] && command -v microsocks >/dev/null 2>&1; then
+		if [ -n "$ADDRESS_V4" ]; then
+			microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
+		else
+			microsocks -i 0.0.0.0 -p "$SOCKS_PORT" &
+		fi
+		echo $! > "$SOCKS_PID_FILE"
+		logger -t warp "Started microsocks on port $SOCKS_PORT"
+	fi
+}
 
 start_service() {
-    config_load warp
-    config_get ENABLED config enabled 0
-    [ "$ENABLED" != "1" ] && return 0
-    
-    if [ ! -x "$USQUE_BIN" ]; then
-        logger -t warp "Found no usque binary at $USQUE_BIN"
-        return 1
-    fi
+	config_load warp
+	config_get ENABLED config enabled 0
+	[ "$ENABLED" = "1" ] || return 0
 
-    if [ ! -f "$CONFIG_FILE" ]; then
-        logger -t warp "Found no warp config.json. Please register first."
-        return 1
-    fi
-    
-    # 获取配置
-    config_get ADDRESS_V4 config address_v4 ""
-    config_get ADDRESS_V6 config address_v6 ""
-    config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
-    
-    config_get SOCKS_ENABLED config socks_enabled "1"
-    config_get SOCKS_PORT config socks_port "1080"
-    
-    mkdir -p /var/run/warp
-    
-    # 启动 usque 进程
-    procd_open_instance "usque"
-    procd_set_param command "$USQUE_BIN" nativetun -c "$CONFIG_FILE"
-    procd_set_param respawn
-    procd_set_param stdout 1
-    procd_set_param stderr 1
-    procd_close_instance
-    
-    logger -t warp "Started usque nativetun"
-    
-    # 异步添加路由�?SOCKS5
-    (
-        # 等待 usque 创建 tun 接口
-        local max_wait=30
-        local count=0
-        local USQ_IF=""
-        
-        while [ $count -lt $max_wait ]; do
-            USQ_IF=$(ip link show | grep 'tun' | awk -F': ' '{print $2}' | grep -E '^tun[0-9]+' | head -n 1)
-            [ -n "$USQ_IF" ] && break
-            sleep 1
-            count=$((count + 1))
-        done
-        
-        if [ -z "$USQ_IF" ]; then
-            logger -t warp "Failed to find usque tun interface after $max_wait seconds."
-            exit 1
-        fi
+	if [ ! -x "$USQUE_BIN" ]; then
+		logger -t warp "Missing usque binary at $USQUE_BIN"
+		return 1
+	fi
 
-        logger -t warp "usque interface created: $USQ_IF"
+	if [ ! -f "$CONFIG_FILE" ]; then
+		logger -t warp "Missing $CONFIG_FILE. Run warp-manager register first."
+		return 1
+	fi
 
-        # 4. 配置接口 IP (有些版本不会自动配置)
-        [ -n "$ADDRESS_V4" ] && ip addr add "$ADDRESS_V4/32" dev "$USQ_IF" 2>/dev/null
-        [ -n "$ADDRESS_V6" ] && ip addr add "$ADDRESS_V6/128" dev "$USQ_IF" 2>/dev/null
-        ip link set "$USQ_IF" up
+	modprobe tun >/dev/null 2>&1 || true
+	mkdir -p "$RUNTIME_DIR"
 
-        # 解析 endpoint IP (用于排除路由)
-        local end_host="${ENDPOINT%:*}"
-        local wan_gw=$(ip route show default | grep -v "$USQ_IF" | awk '{print $3}' | head -1)
+	procd_open_instance "usque"
+	procd_set_param command "$USQUE_BIN" -c "$CONFIG_FILE" nativetun
+	procd_set_param respawn
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
 
-        if [ -n "$wan_gw" ]; then
-            # 使用多种方式尝试解析以提高成功率
-            local end_ip=$(nslookup "$end_host" 2>/dev/null | grep Address | awk '{print $2}' | tail -1)
-            [ -z "$end_ip" ] && end_ip=$(resolveip -4 "$end_host" 2>/dev/null | head -1)
-
-            # 添加指向 Cloudflare Endpoint 的直连防环路
-            if [ -n "$end_ip" ]; then
-                ip route add "$end_ip/32" via "$wan_gw" 2>/dev/null
-                logger -t warp "Added direct route to endpoint $end_ip via $wan_gw"
-            fi
-        fi
-
-        
-        # 添加默认路由 (全局代理模式)
-        config_get GLOBAL_PROXY config global_proxy 1
-        if [ "$GLOBAL_PROXY" = "1" ]; then
-            ip route add 0.0.0.0/1 dev "$USQ_IF"
-            ip route add 128.0.0.0/1 dev "$USQ_IF"
-        fi
-        
-        # 记录当前�?tun 接口名以便后续清�?
-        echo "$USQ_IF" > /var/run/warp/tun_iface
-        
-        # 5. 防火�?(简单的伪装)
-        iptables -t nat -A POSTROUTING -o "$USQ_IF" -j MASQUERADE
-        
-        # 6. SOCKS5 代理
-        if [ "$SOCKS_ENABLED" = "1" ]; then
-            if command -v microsocks >/dev/null 2>&1; then
-                # �?microsocks 经由 USQUE 接口的本�?IP 提供代理服务
-                microsocks -i 0.0.0.0 -p "$SOCKS_PORT" -b "$ADDRESS_V4" &
-                echo $! > "$SOCKS_PID_FILE"
-                logger -t warp "Started microsocks on port $SOCKS_PORT"
-            fi
-        fi
-    ) &
+	logger -t warp "Started usque nativetun"
+	configure_runtime &
 }
 
 stop_service() {
-    config_load warp
-    config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
+	config_load warp
+	config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
 
-    # 1. 查找运行时的接口名
-    local USQ_IF=""
-    if [ -f "/var/run/warp/tun_iface" ]; then
-        USQ_IF=$(cat /var/run/warp/tun_iface)
-    else
-        # fallback
-        USQ_IF=$(ip link show | grep 'tun' | awk -F': ' '{print $2}' | grep -E '^tun[0-9]+' | head -n 1)
-    fi
+	USQ_IF="$(find_usque_iface)"
 
-    # 2. 清理 SOCKS 进程
-    if [ -f "$SOCKS_PID_FILE" ]; then
-        kill $(cat "$SOCKS_PID_FILE") 2>/dev/null
-        rm -f "$SOCKS_PID_FILE"
-    fi
-    killall microsocks >/dev/null 2>&1
+	if [ -f "$SOCKS_PID_FILE" ]; then
+		kill "$(cat "$SOCKS_PID_FILE")" 2>/dev/null || true
+		rm -f "$SOCKS_PID_FILE"
+	fi
 
-    # 3. 清理路由与防火墙
-    if [ -n "$USQ_IF" ]; then
-        ip route del 0.0.0.0/1 dev "$USQ_IF" >/dev/null 2>&1
-        ip route del 128.0.0.0/1 dev "$USQ_IF" >/dev/null 2>&1
-        iptables -t nat -D POSTROUTING -o "$USQ_IF" -j MASQUERADE >/dev/null 2>&1
-    fi
+	if [ -n "$USQ_IF" ]; then
+		ip route del 0.0.0.0/1 dev "$USQ_IF" >/dev/null 2>&1 || true
+		ip route del 128.0.0.0/1 dev "$USQ_IF" >/dev/null 2>&1 || true
+		teardown_masquerade "$USQ_IF"
+	fi
 
-    # 清理 endpoint 直连路由
-    local end_host="${ENDPOINT%:*}"
-    local end_ip=$(nslookup "$end_host" 2>/dev/null | grep Address | awk '{print $2}' | tail -1)
-    [ -z "$end_ip" ] && end_ip=$(resolveip -4 "$end_host" 2>/dev/null | head -1)
-    [ -n "$end_ip" ] && ip route del "$end_ip/32" >/dev/null 2>&1
+	end_host="${ENDPOINT%:*}"
+	end_ip="$(resolve_endpoint_ip "$end_host")"
+	[ -n "$end_ip" ] && ip route del "$end_ip/32" >/dev/null 2>&1 || true
 
-    rm -f /var/run/warp/tun_iface
-    logger -t warp "Service stopped"
+	[ -x /usr/bin/warp-update-china ] && /usr/bin/warp-update-china clear >/dev/null 2>&1 || true
+	rm -f "$RUNTIME_DIR/tun_iface"
+	logger -t warp "Service stopped"
 }
 
-
 reload_service() {
-    stop_service
-    start_service
+	stop_service
+	start_service
 }

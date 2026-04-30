@@ -1,6 +1,18 @@
 * text=auto
 
-# Enforce LF line endings for Makefiles
+# OpenWrt package files and shell scripts must stay LF-only.
+.gitattributes text eol=lf
+.gitignore text eol=lf
+LICENSE text eol=lf
 Makefile text eol=lf
 *.mk text eol=lf
 *.sh text eol=lf
+*.js text eol=lf
+*.json text eol=lf
+*.po text eol=lf
+*.pot text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+root/etc/config/* text eol=lf
+root/etc/init.d/* text eol=lf
+root/usr/bin/* text eol=lf

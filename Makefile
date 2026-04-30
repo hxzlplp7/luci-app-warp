@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=luci-app-warp
-PKG_VERSION:=1.3.0
+PKG_VERSION:=1.3.1
 PKG_RELEASE:=1
 
 PKG_MAINTAINER:=hxzlplp7
@@ -17,12 +17,13 @@ define Package/$(PKG_NAME)
   CATEGORY:=LuCI
   SUBMENU:=3. Applications
   TITLE:=LuCI support for Cloudflare WARP via usque
-  DEPENDS:=+luci-base +curl +jsonfilter +usque
+  DEPENDS:=+luci-base +curl +jsonfilter +kmod-tun +ca-bundle +microsocks
   PKGARCH:=all
 endef
 
 define Package/$(PKG_NAME)/description
   LuCI interface for managing Cloudflare WARP via usque (MASQUE protocol) with global proxy support.
+  The usque binary is not part of the official OpenWrt feeds and must be installed separately.
   Features include auto registration, global traffic proxy, China IP bypass, 
   SOCKS5 proxy, pre-proxy support, and WARP+ license upgrade.
 endef
@@ -79,6 +80,7 @@ define Package/$(PKG_NAME)/postinst
 	/etc/init.d/warp enable 2>/dev/null
 	/etc/init.d/rpcd restart 2>/dev/null
 	rm -rf /tmp/luci-indexcache /tmp/luci-modulecache
+	[ -x /usr/bin/usque ] || echo "luci-app-warp: /usr/bin/usque is required; run install.sh or install usque manually." >&2
 }
 exit 0
 endef
