@@ -160,7 +160,7 @@ uci commit warp
 warp-manager restart
 ```
 
-与 OpenClash fake-ip 模式共存时，`198.18.0.0/15` 是 fake-ip 地址段，不是真实 WARP endpoint。v1.3.9 起会忽略这类地址，不再为 `198.18.x.x` 添加直连路由。修改 `endpoint_h2_v4` 后必须重启服务；日志里应出现 `Using HTTP/2 endpoint override`，且 usque 应显示新的 endpoint。
+与 OpenClash fake-ip 模式共存时，`198.18.0.0/15` 是 fake-ip 地址段，不是真实 WARP endpoint。v1.3.9 起会忽略这类地址，不再为 `198.18.x.x` 添加直连路由。修改 `endpoint_h2_v4` 后必须重启服务；日志里应出现 `Using HTTP/2 endpoint override`，且 usque 应显示新的 endpoint。v1.3.10 修复了部分 BusyBox awk 环境下写入运行时 `endpoint_h2_v4` 失败的问题。
 
 ### 服务管理
 
@@ -309,6 +309,10 @@ A:
 - 使用第三方生成器（不保证可用性）
 
 ## 📝 更新日志
+
+### v1.3.10
+
+- 修复部分 BusyBox awk 环境下设置 `endpoint_h2_v4` 后启动失败，日志反复出现 `Failed to set endpoint_h2_v4 in runtime usque config` 的问题
 
 ### v1.3.9
 

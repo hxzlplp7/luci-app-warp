@@ -154,30 +154,26 @@ json_set_string() {
 	[ -s "$json_file" ] || return 1
 	json_safe_value "$json_value" || return 1
 
+	if grep -q "\"$json_key\"[[:space:]]*:" "$json_file"; then
+		sed "s/\"$json_key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"/\"$json_key\": \"$json_value\"/" "$json_file" > "$tmp_file" && \
+			mv "$tmp_file" "$json_file"
+		return
+	fi
+
 	awk -v key="$json_key" -v value="$json_value" '
-		{
-			lines[NR] = $0
-			if ($0 ~ "\"" key "\"[[:space:]]*:") {
-				sub("\"" key "\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\"", "\"" key "\": \"" value "\"", lines[NR])
-				found = 1
+		!inserted {
+			pos = index($0, "{")
+			if (pos > 0) {
+				print substr($0, 1, pos)
+				print "  \"" key "\": \"" value "\","
+				rest = substr($0, pos + 1)
+				if (rest != "") print rest
+				inserted = 1
+				next
 			}
 		}
-		END {
-			if (found) {
-				for (i = 1; i <= NR; i++) print lines[i]
-				exit
-			}
-
-			for (i = 1; i <= NR; i++) {
-				if (!inserted && lines[i] ~ /^[[:space:]]*{/) {
-					sub("{", "{\n  \"" key "\": \"" value "\",", lines[i])
-					inserted = 1
-				}
-				print lines[i]
-			}
-
-			if (!inserted) exit 1
-		}
+		{ print }
+		END { if (!inserted) exit 1 }
 	' "$json_file" > "$tmp_file" && mv "$tmp_file" "$json_file"
 }
 
