@@ -10,6 +10,7 @@ USQUE_BIN="/usr/bin/usque"
 CONFIG_FILE="/etc/warp/config.json"
 SOCKS_PID_FILE="/var/run/warp-socks.pid"
 RUNTIME_DIR="/var/run/warp"
+RUNTIME_CONFIG_FILE="$RUNTIME_DIR/config.json"
 LOG_FILE="/var/log/warp.log"
 NFT_TABLE="luci_warp"
 
@@ -64,7 +65,7 @@ force_stop_usque() {
 
 find_wan_default_route() {
 	tun_iface="$1"
-	ip route show default | awk -v tun="$tun_iface" '
+	ip -4 route show default | awk -v tun="$tun_iface" '
 		{
 			gw = "";
 			dev = "";
@@ -86,9 +87,19 @@ resolve_endpoint_ip() {
 
 resolve_host_ip() {
 	endpoint_host="$1"
-	endpoint_ip="$(nslookup "$endpoint_host" 2>/dev/null | awk '/^Address[[:space:]]+[0-9]+:/ {print $3} /^Address[0-9]*:/ {print $2}' | tail -n 1)"
+	endpoint_ip="$(nslookup "$endpoint_host" 2>/dev/null | awk '
+		/^Address[[:space:]]+[0-9]+:/ && $3 ~ /^[0-9.]+$/ {print $3}
+		/^Address[0-9]*:/ && $2 ~ /^[0-9.]+$/ {print $2}
+	' | tail -n 1)"
 	[ -z "$endpoint_ip" ] && endpoint_ip="$(resolveip -4 "$endpoint_host" 2>/dev/null | head -n 1)"
 	printf '%s\n' "$endpoint_ip"
+}
+
+uci_endpoint_ips() {
+	config_get endpoint_h2_v4 config endpoint_h2_v4 ""
+	case "$endpoint_h2_v4" in
+		*.*.*.*) printf '%s\n' "$endpoint_h2_v4" ;;
+	esac
 }
 
 config_endpoint_ips() {
@@ -105,9 +116,109 @@ config_endpoint_ips() {
 endpoint_ips() {
 	endpoint_host="$1"
 	{
+		uci_endpoint_ips
 		config_endpoint_ips
 		resolve_host_ip "$endpoint_host"
 	} | awk 'NF && !seen[$0]++'
+}
+
+json_safe_value() {
+	case "$1" in
+		""|*[!A-Za-z0-9.:_-]*) return 1 ;;
+	esac
+}
+
+json_set_string() {
+	json_file="$1"
+	json_key="$2"
+	json_value="$3"
+	tmp_file="$RUNTIME_DIR/config.$$"
+
+	[ -s "$json_file" ] || return 1
+	json_safe_value "$json_value" || return 1
+
+	awk -v key="$json_key" -v value="$json_value" '
+		{
+			lines[NR] = $0
+			if ($0 ~ "\"" key "\"[[:space:]]*:") {
+				sub("\"" key "\"[[:space:]]*:[[:space:]]*\"([^\"\\\\]|\\\\.)*\"", "\"" key "\": \"" value "\"", lines[NR])
+				found = 1
+			}
+		}
+		END {
+			if (found) {
+				for (i = 1; i <= NR; i++) print lines[i]
+				exit
+			}
+
+			for (i = 1; i <= NR; i++) {
+				if (!inserted && lines[i] ~ /^[[:space:]]*{/) {
+					sub("{", "{\n  \"" key "\": \"" value "\",", lines[i])
+					inserted = 1
+				}
+				print lines[i]
+			}
+
+			if (!inserted) exit 1
+		}
+	' "$json_file" > "$tmp_file" && mv "$tmp_file" "$json_file"
+}
+
+prepare_runtime_config() {
+	config_get ENDPOINT_H2_V4 config endpoint_h2_v4 ""
+
+	rm -f "$RUNTIME_CONFIG_FILE"
+	if [ -z "$ENDPOINT_H2_V4" ]; then
+		printf '%s\n' "$CONFIG_FILE"
+		return 0
+	fi
+
+	case "$ENDPOINT_H2_V4" in
+		*.*.*.*) ;;
+		*)
+			warp_log "Invalid endpoint_h2_v4: $ENDPOINT_H2_V4"
+			return 1
+			;;
+	esac
+
+	cp "$CONFIG_FILE" "$RUNTIME_CONFIG_FILE" 2>/dev/null || {
+		warp_log "Failed to create runtime usque config"
+		return 1
+	}
+
+	json_set_string "$RUNTIME_CONFIG_FILE" endpoint_h2_v4 "$ENDPOINT_H2_V4" || {
+		warp_log "Failed to set endpoint_h2_v4 in runtime usque config"
+		rm -f "$RUNTIME_CONFIG_FILE"
+		return 1
+	}
+
+	warp_log "Using HTTP/2 endpoint override: $ENDPOINT_H2_V4"
+	printf '%s\n' "$RUNTIME_CONFIG_FILE"
+}
+
+pre_proxy_url() {
+	config_get PRE_PROXY_ENABLED config pre_proxy_enabled "0"
+	config_get PRE_PROXY_TYPE config pre_proxy_type "socks5"
+	config_get PRE_PROXY_ADDR config pre_proxy_addr "127.0.0.1"
+	config_get PRE_PROXY_PORT config pre_proxy_port "7890"
+
+	[ "$PRE_PROXY_ENABLED" = "1" ] || return 1
+	[ -n "$PRE_PROXY_ADDR" ] && [ -n "$PRE_PROXY_PORT" ] || return 1
+
+	case "$PRE_PROXY_TYPE" in
+		http|socks5) ;;
+		*)
+			warp_log "Unsupported pre-proxy type: $PRE_PROXY_TYPE"
+			return 1
+			;;
+	esac
+
+	case "$PRE_PROXY_ADDR" in
+		*:*) proxy_addr="[$PRE_PROXY_ADDR]" ;;
+		*) proxy_addr="$PRE_PROXY_ADDR" ;;
+	esac
+
+	printf '%s://%s:%s\n' "$PRE_PROXY_TYPE" "$proxy_addr" "$PRE_PROXY_PORT"
 }
 
 protect_endpoint_routes() {
@@ -118,12 +229,23 @@ protect_endpoint_routes() {
 	[ -n "$wan_if" ] || return 0
 
 	for end_ip in $(endpoint_ips "$endpoint_host"); do
+		case "$end_ip" in
+			*.*.*.*) ;;
+			*) continue ;;
+		esac
+
 		if [ -n "$wan_gw" ]; then
-			ip route replace "$end_ip/32" via "$wan_gw" dev "$wan_if" 2>/dev/null || true
-			warp_log "Added direct route to endpoint $end_ip via $wan_gw dev $wan_if"
+			if ip route replace "$end_ip/32" via "$wan_gw" dev "$wan_if" 2>/dev/null; then
+				warp_log "Added direct route to endpoint $end_ip via $wan_gw dev $wan_if"
+			else
+				warp_log "Failed to add direct route to endpoint $end_ip via $wan_gw dev $wan_if"
+			fi
 		else
-			ip route replace "$end_ip/32" dev "$wan_if" 2>/dev/null || true
-			warp_log "Added direct route to endpoint $end_ip dev $wan_if"
+			if ip route replace "$end_ip/32" dev "$wan_if" 2>/dev/null; then
+				warp_log "Added direct route to endpoint $end_ip dev $wan_if"
+			else
+				warp_log "Failed to add direct route to endpoint $end_ip dev $wan_if"
+			fi
 		fi
 	done
 }
@@ -132,6 +254,10 @@ delete_endpoint_routes() {
 	endpoint_host="$1"
 
 	for end_ip in $(endpoint_ips "$endpoint_host"); do
+		case "$end_ip" in
+			*.*.*.*) ;;
+			*) continue ;;
+		esac
 		ip route del "$end_ip/32" >/dev/null 2>&1 || true
 	done
 }
@@ -259,6 +385,8 @@ start_service() {
 
 	ensure_tun_available || return 1
 	mkdir -p "$RUNTIME_DIR"
+	ACTIVE_CONFIG="$(prepare_runtime_config)" || return 1
+	PRE_PROXY_URL="$(pre_proxy_url)"
 
 	end_host="${ENDPOINT%:*}"
 	wan_route="$(find_wan_default_route "")"
@@ -267,9 +395,12 @@ start_service() {
 	protect_endpoint_routes "$end_host" "$wan_gw" "$wan_if"
 
 	procd_open_instance "usque"
-	procd_set_param command "$USQUE_BIN" -c "$CONFIG_FILE" nativetun
+	procd_set_param command "$USQUE_BIN" -c "$ACTIVE_CONFIG" nativetun
 	[ "$HTTP2" = "1" ] && procd_append_param command --http2
 	[ -n "$SNI_ADDRESS" ] && procd_append_param command -s "$SNI_ADDRESS"
+	if [ -n "$PRE_PROXY_URL" ]; then
+		procd_set_param env HTTP_PROXY="$PRE_PROXY_URL" HTTPS_PROXY="$PRE_PROXY_URL" ALL_PROXY="$PRE_PROXY_URL" NO_PROXY="127.0.0.1,localhost,::1"
+	fi
 	procd_set_param respawn
 	procd_set_param stdout 1
 	procd_set_param stderr 1
@@ -280,6 +411,13 @@ start_service() {
 		warp_log "Started usque nativetun using HTTP/2"
 	else
 		warp_log "Started usque nativetun using HTTP/3"
+	fi
+	if [ -n "$PRE_PROXY_URL" ]; then
+		if [ "$HTTP2" = "1" ]; then
+			warp_log "Using pre-proxy for HTTP/2: $PRE_PROXY_URL"
+		else
+			warp_log "Pre-proxy is configured but usque only honors proxy environment in HTTP/2 mode"
+		fi
 	fi
 	configure_runtime &
 }
@@ -306,7 +444,7 @@ stop_service() {
 
 	[ -x /usr/bin/warp-update-china ] && /usr/bin/warp-update-china clear >/dev/null 2>&1 || true
 	force_stop_usque
-	rm -f "$RUNTIME_DIR/tun_iface"
+	rm -f "$RUNTIME_DIR/tun_iface" "$RUNTIME_CONFIG_FILE"
 	warp_log "Service stopped"
 }
 

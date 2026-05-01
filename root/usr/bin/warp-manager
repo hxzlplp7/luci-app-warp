@@ -193,10 +193,15 @@ get_status() {
 	BYPASS_CHINA="$(uci -q get warp.config.bypass_china)"
 	SOCKS_ENABLED="$(uci -q get warp.config.socks_enabled)"
 	SOCKS_PORT="$(uci -q get warp.config.socks_port)"
+	PRE_PROXY_ENABLED="$(uci -q get warp.config.pre_proxy_enabled)"
+	PRE_PROXY_TYPE="$(uci -q get warp.config.pre_proxy_type)"
+	PRE_PROXY_ADDR="$(uci -q get warp.config.pre_proxy_addr)"
+	PRE_PROXY_PORT="$(uci -q get warp.config.pre_proxy_port)"
 
 	[ "$GLOBAL_PROXY" = "1" ] && printf '%s\n' "Global proxy: enabled" || printf '%s\n' "Global proxy: disabled"
 	[ "$BYPASS_CHINA" = "1" ] && printf '%s\n' "China IP bypass: enabled" || printf '%s\n' "China IP bypass: disabled"
 	[ "$SOCKS_ENABLED" = "1" ] && printf '%s\n' "SOCKS5: enabled on ${SOCKS_PORT:-1080}" || printf '%s\n' "SOCKS5: disabled"
+	[ "$PRE_PROXY_ENABLED" = "1" ] && printf '%s\n' "Pre-proxy: ${PRE_PROXY_TYPE:-socks5}://${PRE_PROXY_ADDR:-127.0.0.1}:${PRE_PROXY_PORT:-7890}" || printf '%s\n' "Pre-proxy: disabled"
 }
 
 test_connection() {

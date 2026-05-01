@@ -78,6 +78,13 @@ return view.extend({
         o.rmempty = false;
         o.description = _('通过 TCP/TLS 连接 WARP，适合 UDP/QUIC 443 被阻断或默认 MASQUE 一直超时的网络');
 
+        o = s.option(form.Value, 'endpoint_h2_v4', _('HTTP/2 IPv4 端点'));
+        o.datatype = 'ip4addr';
+        o.placeholder = '162.159.198.2';
+        o.rmempty = true;
+        o.depends('http2', '1');
+        o.description = _('留空使用 usque 配置中的 endpoint_h2_v4；当日志出现 connection reset by peer 时可尝试更换此地址');
+
         o = s.option(form.Value, 'sni_address', _('SNI 地址'));
         o.datatype = 'hostname';
         o.placeholder = 'consumer-masque.cloudflareclient.com';
@@ -123,7 +130,7 @@ return view.extend({
         // 前置代理
         s = m.section(form.NamedSection, 'config', 'warp', _('前置代理'));
         s.anonymous = true;
-        s.description = _('通过本地已有的代理端口连接 WARP 服务器（如 Clash、v2ray 等提供的本地代理）');
+        s.description = _('HTTP/2 模式下通过本地已有的代理端口连接 WARP 服务器（如 Clash、v2ray 等提供的本地代理）');
 
         o = s.option(form.Flag, 'pre_proxy_enabled', _('启用前置代理'));
         o.default = '0';

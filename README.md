@@ -140,6 +140,26 @@ uci commit warp
 warp-manager restart
 ```
 
+如果 HTTP/2 模式反复出现 `read: connection reset by peer`，说明当前网络到所选 HTTP/2 endpoint 的 TCP/TLS 连接被重置。可先尝试改用本地前置代理：
+
+```bash
+uci set warp.config.http2='1'
+uci set warp.config.pre_proxy_enabled='1'
+uci set warp.config.pre_proxy_type='socks5'
+uci set warp.config.pre_proxy_addr='127.0.0.1'
+uci set warp.config.pre_proxy_port='7890'
+uci commit warp
+warp-manager restart
+```
+
+也可以更换 HTTP/2 IPv4 endpoint；该值会写入运行时 usque 配置，不会覆盖 `/etc/warp/config.json` 原始账户文件：
+
+```bash
+uci set warp.config.endpoint_h2_v4='162.159.198.1'
+uci commit warp
+warp-manager restart
+```
+
 ### 服务管理
 
 ```bash
@@ -162,6 +182,9 @@ warp-manager restart
 |------|------|--------|
 | `enabled` | 启用WARP | `0` |
 | `endpoint` | WARP服务器地址 | `engage.cloudflareclient.com:2408` |
+| `http2` | 使用 HTTP/2/TCP 连接 WARP | `0` |
+| `endpoint_h2_v4` | HTTP/2 IPv4 endpoint 覆盖值 | 空 |
+| `sni_address` | MASQUE TLS SNI 覆盖值 | 空 |
 | `mtu` | MTU值 | `1280` |
 | `dns` | DNS服务器 | `1.1.1.1` |
 | `ipv6` | 启用IPv6 | `1` |
@@ -284,6 +307,12 @@ A:
 - 使用第三方生成器（不保证可用性）
 
 ## 📝 更新日志
+
+### v1.3.8
+
+- 修复 endpoint 保护路由可能把 IPv6 解析结果误记为 IPv4 `/32` 路由的问题，并只在路由添加成功时记录成功日志
+- 让现有“前置代理”设置在 HTTP/2 模式下通过 `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` 传给 usque
+- 新增 `endpoint_h2_v4` UCI/LuCI 配置，用于 HTTP/2 模式下切换被重置的 Cloudflare endpoint
 
 ### v1.3.7
 
