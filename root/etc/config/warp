@@ -1,6 +1,6 @@
 config warp 'config'
 	option enabled '0'
-	option endpoint 'engage.cloudflareclient.com:2408'
+	option endpoint 'consumer-masque.cloudflareclient.com:443'
 	option http2 '0'
 	option endpoint_h2_v4 ''
 	option sni_address ''

@@ -69,9 +69,9 @@ return view.extend({
         o.default = '0';
 
         o = s.option(form.Value, 'endpoint', _('服务器地址'));
-        o.default = 'engage.cloudflareclient.com:2408';
+        o.default = 'consumer-masque.cloudflareclient.com:443';
         o.rmempty = false;
-        o.description = _('WARP 服务器端点地址和端口');
+        o.description = _('WARP 服务器端点地址和端口；建议使用官方 MASQUE 端点 consumer-masque.cloudflareclient.com:443');
 
         o = s.option(form.Flag, 'http2', _('使用 HTTP/2'));
         o.default = '0';
@@ -87,9 +87,9 @@ return view.extend({
 
         o = s.option(form.Value, 'sni_address', _('SNI 地址'));
         o.datatype = 'hostname';
-        o.placeholder = 'consumer-masque.cloudflareclient.com';
+        o.placeholder = 'www.visa.cn';
         o.rmempty = true;
-        o.description = _('留空使用 usque 默认值；如网络阻断默认 SNI，可填写自定义域名');
+        o.description = _('留空使用 usque 默认值；针对连接超时或 UDP 阻断环境，建议尝试使用 www.visa.cn 或 www.apple.com 进行 SNI 伪装');
 
         o = s.option(form.Value, 'mtu', _('MTU'));
         o.datatype = 'range(1280,1500)';

@@ -388,7 +388,15 @@ configure_runtime() {
 	fi
 }
 
+optimize_sysctl() {
+	# 增加 UDP 接收和发送缓冲区大小，优化 QUIC 性能
+	sysctl -w net.core.rmem_max=2621440 >/dev/null 2>&1 || true
+	sysctl -w net.core.wmem_max=2621440 >/dev/null 2>&1 || true
+	warp_log "Optimized system network parameters for QUIC"
+}
+
 start_service() {
+	optimize_sysctl
 	config_load warp
 	config_get ENABLED config enabled 0
 	config_get ENDPOINT config endpoint "engage.cloudflareclient.com:2408"
