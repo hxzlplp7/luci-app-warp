@@ -95,10 +95,25 @@ resolve_host_ip() {
 	printf '%s\n' "$endpoint_ip"
 }
 
+is_endpoint_route_ip() {
+	printf '%s\n' "$1" | awk -F. '
+		NF != 4 { exit 1 }
+		{
+			for (i = 1; i <= 4; i++) {
+				if ($i !~ /^[0-9]+$/ || $i < 0 || $i > 255) exit 1
+			}
+
+			if ($1 == 198 && ($2 == 18 || $2 == 19)) exit 1
+			exit 0
+		}'
+}
+
 uci_endpoint_ips() {
 	config_get endpoint_h2_v4 config endpoint_h2_v4 ""
 	case "$endpoint_h2_v4" in
-		*.*.*.*) printf '%s\n' "$endpoint_h2_v4" ;;
+		*.*.*.*)
+			is_endpoint_route_ip "$endpoint_h2_v4" && printf '%s\n' "$endpoint_h2_v4"
+			;;
 	esac
 }
 
@@ -107,7 +122,9 @@ config_endpoint_ips() {
 		for expr in '@.endpoint_v4' '@.endpoint_h2_v4'; do
 			endpoint_ip="$(jsonfilter -i "$CONFIG_FILE" -e "$expr" 2>/dev/null)"
 			case "$endpoint_ip" in
-				*.*.*.*) printf '%s\n' "$endpoint_ip" ;;
+				*.*.*.*)
+					is_endpoint_route_ip "$endpoint_ip" && printf '%s\n' "$endpoint_ip"
+					;;
 			esac
 		done
 	fi
@@ -181,6 +198,11 @@ prepare_runtime_config() {
 			;;
 	esac
 
+	if ! is_endpoint_route_ip "$ENDPOINT_H2_V4"; then
+		warp_log "Invalid endpoint_h2_v4: $ENDPOINT_H2_V4 is reserved or fake-ip"
+		return 1
+	fi
+
 	cp "$CONFIG_FILE" "$RUNTIME_CONFIG_FILE" 2>/dev/null || {
 		warp_log "Failed to create runtime usque config"
 		return 1
@@ -233,6 +255,10 @@ protect_endpoint_routes() {
 			*.*.*.*) ;;
 			*) continue ;;
 		esac
+		if ! is_endpoint_route_ip "$end_ip"; then
+			warp_log "Ignored reserved or fake endpoint route: $end_ip"
+			continue
+		fi
 
 		if [ -n "$wan_gw" ]; then
 			if ip route replace "$end_ip/32" via "$wan_gw" dev "$wan_if" 2>/dev/null; then
@@ -258,6 +284,7 @@ delete_endpoint_routes() {
 			*.*.*.*) ;;
 			*) continue ;;
 		esac
+		is_endpoint_route_ip "$end_ip" || continue
 		ip route del "$end_ip/32" >/dev/null 2>&1 || true
 	done
 }

@@ -160,6 +160,8 @@ uci commit warp
 warp-manager restart
 ```
 
+与 OpenClash fake-ip 模式共存时，`198.18.0.0/15` 是 fake-ip 地址段，不是真实 WARP endpoint。v1.3.9 起会忽略这类地址，不再为 `198.18.x.x` 添加直连路由。修改 `endpoint_h2_v4` 后必须重启服务；日志里应出现 `Using HTTP/2 endpoint override`，且 usque 应显示新的 endpoint。
+
 ### 服务管理
 
 ```bash
@@ -307,6 +309,11 @@ A:
 - 使用第三方生成器（不保证可用性）
 
 ## 📝 更新日志
+
+### v1.3.9
+
+- 兼容 OpenClash fake-ip 模式：忽略 `198.18.0.0/15` fake/reserved 地址，避免把 fake-ip 当作 WARP endpoint 添加直连路由
+- 校验 `endpoint_h2_v4`，避免把 fake-ip 写入运行时 usque 配置
 
 ### v1.3.8
 
